@@ -18,6 +18,8 @@ $env:PYTHONPATH="$PWD\src"
 python -m unittest
 python -m beecthor_perps status
 python -m beecthor_perps evaluate --thesis examples\beecthor_thesis.sample.json --price 78100
+python -m beecthor_perps check-telegram
+python -m beecthor_perps run-engine --once
 ```
 
 Or install it editable:
@@ -32,6 +34,21 @@ beecthor-perps status
 1. `shadow`: parse theses, produce decisions, write no exchange orders.
 2. `testnet`: send orders only to Binance USD-M Futures testnet.
 3. `mainnet`: disabled unless all real-money guardrails are explicitly satisfied.
+
+## V1 Flow
+
+`beecthor-summary` owns the LLM step. When the daily Beecthor transcript is summarized, it also writes a safe operable thesis to `data/perps_theses/latest.json`.
+
+`beecthor-perps` owns execution and risk. Configure `BEECTHOR_THESIS_FILE` to point at that `latest.json`; the engine then:
+
+- loads the latest thesis
+- waits for a closed 5m reclaim/rejection
+- validates reward/risk, stop, take-profit, notional, leverage, and symbol
+- places the entry only in Binance Demo/Testnet
+- immediately places exchange-native stop-loss and take-profit orders
+- sends Telegram notifications for open, TP, SL, unknown close, and critical protection failures
+
+Telegram notifications reuse the existing BeecthorDaily bot through `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. Secrets stay in `.env`, never in Git.
 
 ## Safety Contract
 

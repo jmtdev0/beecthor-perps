@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from .config import Settings
-from .models import BeecthorThesis, Decision, DecisionAction, Direction, MarketSnapshot, OrderIntent, PriceZone
+from .models import BeecthorThesis, Candle, Decision, DecisionAction, Direction, MarketSnapshot, OrderIntent, PriceZone
 from .safety import validate_market_snapshot, validate_order_intent
+
+
+MIN_REWARD_RISK = 1.5
+SHORT_SETUPS = {"short_resistance", "short_rejection", "short_resistance_bearish_regime"}
+LONG_SETUPS = {"long_support", "sweep_reclaim_long", "long_support_sweep_reclaim"}
 
 
 def _quantity_from_notional(notional_usdt: float, price: float) -> float:
@@ -27,10 +32,19 @@ def _build_intent(
     direction: Direction,
     zone: PriceZone,
     reason: str,
+    min_reward_risk: float | None = None,
 ) -> Decision:
     take_profit = _first_target(zone, direction)
     if take_profit is None:
         return Decision(DecisionAction.REJECT, "No viable take-profit target in thesis zone")
+    if min_reward_risk is not None and not _has_reward_risk(
+        entry=snapshot.price,
+        stop_loss=zone.stop_loss,
+        take_profit=take_profit,
+        direction=direction,
+        minimum=min_reward_risk,
+    ):
+        return Decision(DecisionAction.REJECT, f"Reward/risk is below {min_reward_risk:.1f}R")
 
     target_notional = settings.safety.default_notional_usdt
     if direction == Direction.LONG:
@@ -53,16 +67,66 @@ def _build_intent(
     return Decision(DecisionAction.TRADE, reason, intent)
 
 
+def _has_reward_risk(
+    *,
+    entry: float,
+    stop_loss: float,
+    take_profit: float,
+    direction: Direction,
+    minimum: float,
+) -> bool:
+    if direction == Direction.LONG:
+        risk = entry - stop_loss
+        reward = take_profit - entry
+    else:
+        risk = stop_loss - entry
+        reward = entry - take_profit
+    return risk > 0 and reward > 0 and reward / risk >= minimum
+
+
+def _closed(candles: list[Candle]) -> list[Candle]:
+    return [candle for candle in candles if candle.closed]
+
+
+def _long_reclaim_is_clear(zone: PriceZone, candles: list[Candle]) -> bool:
+    closed = _closed(candles)[-4:]
+    if len(closed) < 2:
+        return False
+    reclaim_candle = closed[-2]
+    hold_candle = closed[-1]
+    sweep_low = min(candle.low for candle in closed)
+    touched_zone = any(candle.low <= zone.high for candle in closed)
+    return (
+        touched_zone
+        and reclaim_candle.close > zone.high
+        and hold_candle.close > zone.high
+        and hold_candle.low > sweep_low
+    )
+
+
+def _short_rejection_is_clear(zone: PriceZone, candles: list[Candle]) -> bool:
+    closed = _closed(candles)[-4:]
+    if len(closed) < 2:
+        return False
+    rejection_candle = closed[-2]
+    hold_candle = closed[-1]
+    sweep_high = max(candle.high for candle in closed)
+    touched_zone = any(candle.high >= zone.low for candle in closed)
+    return (
+        touched_zone
+        and rejection_candle.close < zone.low
+        and hold_candle.close < zone.low
+        and hold_candle.high < sweep_high
+    )
+
+
 def evaluate_thesis(thesis: BeecthorThesis, snapshot: MarketSnapshot, settings: Settings) -> Decision:
     validate_market_snapshot(snapshot, settings)
 
     if thesis.confidence < 0.55:
         return Decision(DecisionAction.WAIT, "Thesis confidence below threshold")
 
-    bearish_short = thesis.macro_bias == "bearish" and thesis.preferred_setup in {
-        "short_resistance",
-        "short_rejection",
-    }
+    bearish_short = thesis.macro_bias == "bearish" and thesis.preferred_setup in SHORT_SETUPS
     if bearish_short:
         for zone in thesis.short_zones:
             if zone.contains(snapshot.price):
@@ -76,7 +140,7 @@ def evaluate_thesis(thesis: BeecthorThesis, snapshot: MarketSnapshot, settings: 
                 )
         return Decision(DecisionAction.WAIT, "Bearish thesis active, but price is not in a short zone")
 
-    tactical_long = thesis.preferred_setup in {"long_support", "sweep_reclaim_long"}
+    tactical_long = thesis.preferred_setup in LONG_SETUPS
     if tactical_long:
         for zone in thesis.long_zones:
             if zone.contains(snapshot.price):
@@ -91,3 +155,49 @@ def evaluate_thesis(thesis: BeecthorThesis, snapshot: MarketSnapshot, settings: 
         return Decision(DecisionAction.WAIT, "Long thesis active, but price is not in a long zone")
 
     return Decision(DecisionAction.WAIT, "No supported playbook for thesis")
+
+
+def evaluate_confirmed_thesis(
+    thesis: BeecthorThesis,
+    snapshot: MarketSnapshot,
+    candles: list[Candle],
+    settings: Settings,
+) -> Decision:
+    validate_market_snapshot(snapshot, settings)
+
+    if thesis.preferred_setup in {"wait", "no_trade"}:
+        return Decision(DecisionAction.WAIT, "Thesis is wait/no-trade")
+    if thesis.confidence < 0.55:
+        return Decision(DecisionAction.WAIT, "Thesis confidence below threshold")
+
+    if thesis.preferred_setup in SHORT_SETUPS:
+        if thesis.macro_bias not in {"bearish", "mixed", "neutral", "unknown"}:
+            return Decision(DecisionAction.WAIT, "Short setup contradicts macro bias")
+        for zone in thesis.short_zones:
+            if _short_rejection_is_clear(zone, candles):
+                return _build_intent(
+                    thesis=thesis,
+                    snapshot=snapshot,
+                    settings=settings,
+                    direction=Direction.SHORT,
+                    zone=zone,
+                    reason=f"Clear 5m rejection from Beecthor short zone: {zone.label or zone.low}",
+                    min_reward_risk=MIN_REWARD_RISK,
+                )
+        return Decision(DecisionAction.WAIT, "No clear 5m short rejection yet")
+
+    if thesis.preferred_setup in LONG_SETUPS:
+        for zone in thesis.long_zones:
+            if _long_reclaim_is_clear(zone, candles):
+                return _build_intent(
+                    thesis=thesis,
+                    snapshot=snapshot,
+                    settings=settings,
+                    direction=Direction.LONG,
+                    zone=zone,
+                    reason=f"Clear 5m reclaim from Beecthor long zone: {zone.label or zone.low}",
+                    min_reward_risk=MIN_REWARD_RISK,
+                )
+        return Decision(DecisionAction.WAIT, "No clear 5m long reclaim yet")
+
+    return Decision(DecisionAction.WAIT, "No supported confirmed playbook for thesis")

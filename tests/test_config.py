@@ -45,6 +45,21 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.binance_api_key, "alias-key")
         self.assertEqual(settings.binance_api_secret, "alias-secret")
 
+    def test_telegram_notifications_require_credentials_when_enabled(self):
+        with self.assertRaises(ConfigurationError):
+            Settings.from_env(env={"TELEGRAM_NOTIFICATIONS_ENABLED": "true"})
+
+    def test_telegram_notifications_can_be_enabled(self):
+        settings = Settings.from_env(
+            env={
+                "TELEGRAM_NOTIFICATIONS_ENABLED": "true",
+                "TELEGRAM_BOT_TOKEN": "token",
+                "TELEGRAM_CHAT_ID": "chat",
+            }
+        )
+        self.assertTrue(settings.telegram_notifications_enabled)
+        self.assertEqual(settings.telegram_bot_token, "token")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,14 @@ class DecisionAction(StrEnum):
     REJECT = "reject"
 
 
+class EngineState(StrEnum):
+    WAIT = "wait"
+    ARMED = "armed"
+    TRADE_READY = "trade_ready"
+    IN_POSITION = "in_position"
+    DISABLED = "disabled"
+
+
 @dataclass(frozen=True)
 class PriceZone:
     low: float
@@ -37,8 +45,13 @@ class BeecthorThesis:
     preferred_setup: str
     valid_until: str
     confidence: float
+    schema_version: int = 1
+    symbol: str = "BTCUSDT"
+    generated_at: str = ""
     short_zones: list[PriceZone] = field(default_factory=list)
     long_zones: list[PriceZone] = field(default_factory=list)
+    invalidation_levels: list[Any] = field(default_factory=list)
+    no_trade_conditions: list[str] = field(default_factory=list)
     notes: str = ""
 
     @classmethod
@@ -64,8 +77,13 @@ class BeecthorThesis:
             preferred_setup=str(payload.get("preferred_setup", "no_trade")).lower(),
             valid_until=str(payload.get("valid_until", "")),
             confidence=float(payload.get("confidence", 0.0)),
+            schema_version=int(payload.get("schema_version", 1)),
+            symbol=str(payload.get("symbol", "BTCUSDT")).upper(),
+            generated_at=str(payload.get("generated_at", "")),
             short_zones=zones("short_zones"),
             long_zones=zones("long_zones"),
+            invalidation_levels=list(payload.get("invalidation_levels", []) or []),
+            no_trade_conditions=[str(item) for item in payload.get("no_trade_conditions", []) or []],
             notes=str(payload.get("notes", "")),
         )
 
@@ -81,6 +99,19 @@ class MarketSnapshot:
     @classmethod
     def now(cls, symbol: str, price: float) -> "MarketSnapshot":
         return cls(symbol=symbol.upper(), price=price, observed_at=datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class Candle:
+    symbol: str
+    interval: str
+    open_time: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    close_time: datetime
+    closed: bool = True
 
 
 @dataclass(frozen=True)

@@ -76,12 +76,16 @@ class SafetyLimits:
 class Settings:
     perps_env: str
     broker: str
+    beecthor_thesis_file: str
     binance_base_url: str
     binance_api_key: str
     binance_api_secret: str
     account_role: str
     confirmed_subaccount_id: str
     real_money_ack: bool
+    telegram_notifications_enabled: bool
+    telegram_bot_token: str
+    telegram_chat_id: str
     safety: SafetyLimits
 
     @classmethod
@@ -109,6 +113,7 @@ class Settings:
         settings = cls(
             perps_env=perps_env,
             broker=merged.get("BROKER", "paper").strip().lower(),
+            beecthor_thesis_file=merged.get("BEECTHOR_THESIS_FILE", "").strip(),
             binance_base_url=merged.get("BINANCE_BASE_URL", default_base_url).strip().rstrip("/"),
             binance_api_key=_first_present(
                 merged,
@@ -123,6 +128,9 @@ class Settings:
             account_role=merged.get("ACCOUNT_ROLE", "testnet").strip().lower(),
             confirmed_subaccount_id=merged.get("BINANCE_CONFIRMED_SUBACCOUNT_ID", "").strip(),
             real_money_ack=_bool(merged.get("I_UNDERSTAND_THIS_IS_REAL_MONEY"), False),
+            telegram_notifications_enabled=_bool(merged.get("TELEGRAM_NOTIFICATIONS_ENABLED"), False),
+            telegram_bot_token=merged.get("TELEGRAM_BOT_TOKEN", "").strip(),
+            telegram_chat_id=merged.get("TELEGRAM_CHAT_ID", "").strip(),
             safety=safety,
         )
         settings.validate_startup()
@@ -147,6 +155,10 @@ class Settings:
             raise ConfigurationError("DEFAULT_NOTIONAL_USDT cannot exceed MAX_NOTIONAL_USDT")
         if self.safety.max_leverage < 1:
             raise ConfigurationError("MAX_LEVERAGE must be >= 1")
+        if self.telegram_notifications_enabled and (not self.telegram_bot_token or not self.telegram_chat_id):
+            raise ConfigurationError(
+                "Telegram notifications require TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID"
+            )
 
         if self.perps_env == "testnet" and self.binance_base_url != TESTNET_BASE_URL:
             raise ConfigurationError(f"Testnet must use {TESTNET_BASE_URL}")
@@ -167,12 +179,16 @@ class Settings:
         return {
             "perps_env": self.perps_env,
             "broker": self.broker,
+            "beecthor_thesis_file": self.beecthor_thesis_file,
             "binance_base_url": self.binance_base_url,
             "has_binance_api_key": bool(self.binance_api_key),
             "has_binance_api_secret": bool(self.binance_api_secret),
             "account_role": self.account_role,
             "confirmed_subaccount_id": bool(self.confirmed_subaccount_id),
             "real_money_ack": self.real_money_ack,
+            "telegram_notifications_enabled": self.telegram_notifications_enabled,
+            "has_telegram_bot_token": bool(self.telegram_bot_token),
+            "has_telegram_chat_id": bool(self.telegram_chat_id),
             "safety": {
                 "symbol_allowlist": sorted(self.safety.symbol_allowlist),
                 "default_notional_usdt": self.safety.default_notional_usdt,

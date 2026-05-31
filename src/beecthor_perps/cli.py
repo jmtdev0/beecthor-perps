@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 from .brokers.binance_usdm import BinanceUsdMFuturesClient
 from .brokers.paper import PaperBroker
 from .config import TESTNET_BASE_URL, Settings, load_env_file
+from .engine import PerpsEngine
+from .ledger import ActiveTradeStore, JsonlLedger
 from .models import BeecthorThesis, Direction, MarketSnapshot, OrderIntent
+from .notifications import NotificationLedger, TelegramNotifier
 from .strategy import evaluate_thesis
+from .thesis import load_thesis_file
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -45,6 +50,10 @@ def build_broker(settings: Settings):
     if settings.broker == "paper":
         return PaperBroker(REPO_ROOT / "logs" / "paper_ledger.jsonl")
     return BinanceUsdMFuturesClient(settings)
+
+
+def build_notifier(settings: Settings) -> TelegramNotifier:
+    return TelegramNotifier(settings, NotificationLedger(REPO_ROOT / "logs" / "notification_ledger.jsonl"))
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -127,7 +136,7 @@ def cmd_check_binance_demo(args: argparse.Namespace) -> int:
 
 
 def load_thesis(path: Path) -> BeecthorThesis:
-    return BeecthorThesis.from_dict(json.loads(path.read_text(encoding="utf-8")))
+    return load_thesis_file(path)
 
 
 def cmd_evaluate(args: argparse.Namespace) -> int:
@@ -152,6 +161,42 @@ def cmd_record_paper(args: argparse.Namespace) -> int:
     result = PaperBroker(REPO_ROOT / "logs" / "paper_ledger.jsonl").place_order_intent(decision.intent)
     _print_json({"decision": decision.to_dict(), "result": result})
     return 0
+
+
+def cmd_check_telegram(args: argparse.Namespace) -> int:
+    settings = _settings(args)
+    notifier = build_notifier(settings)
+    event_id = f"check_telegram:{int(time.time())}"
+    result = notifier.send_once(
+        event_id,
+        "Beecthor Perps: prueba de notificaciones Telegram OK. No se ha tocado Binance.",
+    )
+    _print_json(result)
+    return 0
+
+
+def cmd_run_engine(args: argparse.Namespace) -> int:
+    settings = _settings(args)
+    thesis_arg = args.thesis or settings.beecthor_thesis_file
+    if not thesis_arg:
+        raise SystemExit("run-engine requires --thesis or BEECTHOR_THESIS_FILE")
+    thesis_file = Path(thesis_arg)
+    engine = PerpsEngine(
+        settings=settings,
+        broker=build_broker(settings),
+        notifier=build_notifier(settings),
+        thesis_file=thesis_file,
+        decision_ledger=JsonlLedger(REPO_ROOT / "logs" / "decision_ledger.jsonl"),
+        active_trade_store=ActiveTradeStore(REPO_ROOT / "data" / "active_trade.json"),
+        symbol=args.symbol,
+    )
+    if args.once:
+        _print_json(engine.run_once())
+        return 0
+
+    while True:
+        _print_json(engine.run_once())
+        time.sleep(args.poll_seconds)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -182,6 +227,16 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--price", required=True, type=float, help="Current BTCUSDT price")
     record.add_argument("--symbol", default="BTCUSDT", help="Futures symbol")
     record.set_defaults(func=cmd_record_paper)
+
+    check_telegram = subparsers.add_parser("check-telegram", help="Send a Telegram test notification")
+    check_telegram.set_defaults(func=cmd_check_telegram)
+
+    run_engine = subparsers.add_parser("run-engine", help="Run the V1 thesis monitor/executor")
+    run_engine.add_argument("--thesis", default="", help="Path to latest perps thesis JSON")
+    run_engine.add_argument("--symbol", default="BTCUSDT", help="Futures symbol")
+    run_engine.add_argument("--once", action="store_true", help="Run one engine iteration and exit")
+    run_engine.add_argument("--poll-seconds", default=30, type=int, help="Delay between engine iterations")
+    run_engine.set_defaults(func=cmd_run_engine)
 
     return parser
 

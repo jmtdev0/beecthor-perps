@@ -1,9 +1,13 @@
 {
+  "schema_version": 1,
+  "symbol": "BTCUSDT",
+  "source": "beecthor-summary",
   "video_id": "sample-2026-05-25",
   "created_at": "2026-05-25T16:46:04Z",
+  "generated_at": "2099-01-01T00:00:00Z",
   "macro_bias": "bearish",
-  "preferred_setup": "short_resistance",
-  "valid_until": "2026-05-27T16:46:04Z",
+  "preferred_setup": "short_resistance_bearish_regime",
+  "valid_until": "2099-01-03T00:00:00Z",
   "confidence": 0.72,
   "short_zones": [
     {
@@ -15,5 +19,7 @@
     }
   ],
   "long_zones": [],
+  "invalidation_levels": [79500],
+  "no_trade_conditions": ["No clear 5m rejection from the resistance zone"],
   "notes": "Initial sample thesis based on the May short-resistance playbook."
 }
