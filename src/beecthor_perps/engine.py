@@ -60,6 +60,25 @@ class PerpsEngine:
         if not isinstance(self.broker, BinanceUsdMFuturesClient):
             return self._record_state(EngineState.DISABLED, "Configured broker is not Binance USD-M", thesis)
 
+        account = self.broker.account()
+        external_position_amt = _position_amount(account, self.symbol)
+        if abs(external_position_amt) > 0:
+            self.decision_ledger.append(
+                "external_position_detected",
+                {
+                    "state": EngineState.IN_POSITION.value,
+                    "symbol": self.symbol,
+                    "position_amt": external_position_amt,
+                    "reason": "Existing exchange position detected without local active trade state",
+                },
+            )
+            return {
+                "state": EngineState.IN_POSITION.value,
+                "symbol": self.symbol,
+                "position_amt": external_position_amt,
+                "reason": "Existing exchange position detected; no new trade will be opened",
+            }
+
         snapshot = MarketSnapshot.now(self.symbol, self.broker.ticker_price(self.symbol))
         candles = self.broker.klines(self.symbol, interval="5m", limit=6)
         decision = evaluate_confirmed_thesis(thesis, snapshot, candles, self.settings)
