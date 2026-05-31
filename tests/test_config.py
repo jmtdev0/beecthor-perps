@@ -60,6 +60,17 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(settings.telegram_notifications_enabled)
         self.assertEqual(settings.telegram_bot_token, "token")
 
+    def test_telegram_personal_chat_id_is_preferred(self):
+        settings = Settings.from_env(
+            env={
+                "TELEGRAM_NOTIFICATIONS_ENABLED": "true",
+                "TELEGRAM_BOT_TOKEN": "token",
+                "TELEGRAM_CHAT_ID": "group-chat",
+                "TELEGRAM_PERSONAL_CHAT_ID": "personal-chat",
+            }
+        )
+        self.assertEqual(settings.telegram_chat_id, "personal-chat")
+
 
 if __name__ == "__main__":
     unittest.main()

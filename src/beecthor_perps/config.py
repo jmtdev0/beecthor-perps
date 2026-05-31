@@ -130,7 +130,11 @@ class Settings:
             real_money_ack=_bool(merged.get("I_UNDERSTAND_THIS_IS_REAL_MONEY"), False),
             telegram_notifications_enabled=_bool(merged.get("TELEGRAM_NOTIFICATIONS_ENABLED"), False),
             telegram_bot_token=merged.get("TELEGRAM_BOT_TOKEN", "").strip(),
-            telegram_chat_id=merged.get("TELEGRAM_CHAT_ID", "").strip(),
+            telegram_chat_id=_first_present(
+                merged,
+                "TELEGRAM_PERSONAL_CHAT_ID",
+                "TELEGRAM_CHAT_ID",
+            ),
             safety=safety,
         )
         settings.validate_startup()
