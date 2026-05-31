@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "beecthor-perps"
+version = "0.1.0"
+description = "Cautious Beecthor-derived perpetual futures automation for Binance USD-M Futures."
+requires-python = ">=3.11"
+dependencies = [
+  "requests>=2.31.0",
+]
+
+[project.scripts]
+beecthor-perps = "beecthor_perps.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
