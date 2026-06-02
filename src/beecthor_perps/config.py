@@ -73,6 +73,22 @@ class SafetyLimits:
 
 
 @dataclass(frozen=True)
+class StrategySettings:
+    profile: str
+    min_reward_risk: float
+    target_selection: str
+    confirmation_policy: str
+
+    def sanitized(self) -> dict[str, object]:
+        return {
+            "profile": self.profile,
+            "min_reward_risk": self.min_reward_risk,
+            "target_selection": self.target_selection,
+            "confirmation_policy": self.confirmation_policy,
+        }
+
+
+@dataclass(frozen=True)
 class Settings:
     perps_env: str
     broker: str
@@ -87,6 +103,7 @@ class Settings:
     telegram_bot_token: str
     telegram_chat_id: str
     safety: SafetyLimits
+    strategy: StrategySettings
 
     @classmethod
     def from_env(
@@ -101,6 +118,20 @@ class Settings:
 
         perps_env = merged.get("PERPS_ENV", "shadow").strip().lower()
         default_base_url = TESTNET_BASE_URL if perps_env in {"shadow", "testnet"} else MAINNET_BASE_URL
+        strategy_profile = merged.get("STRATEGY_PROFILE", "conservative").strip().lower()
+        strategy_defaults = {
+            "conservative": {
+                "min_reward_risk": 1.5,
+                "target_selection": "first",
+                "confirmation_policy": "two_5m",
+            },
+            "demo_learning": {
+                "min_reward_risk": 1.0,
+                "target_selection": "first_rr_qualified",
+                "confirmation_policy": "one_5m",
+            },
+        }
+        profile_defaults = strategy_defaults.get(strategy_profile, strategy_defaults["conservative"])
         safety = SafetyLimits(
             symbol_allowlist=_csv(merged.get("SYMBOL_ALLOWLIST"), {"BTCUSDT"}),
             default_notional_usdt=_float(merged.get("DEFAULT_NOTIONAL_USDT"), 100.0),
@@ -109,6 +140,25 @@ class Settings:
             daily_loss_limit_usdt=_float(merged.get("DAILY_LOSS_LIMIT_USDT"), 25.0),
             max_open_positions=_int(merged.get("MAX_OPEN_POSITIONS"), 1),
             market_data_max_age_seconds=_int(merged.get("MARKET_DATA_MAX_AGE_SECONDS"), 20),
+        )
+        strategy = StrategySettings(
+            profile=strategy_profile,
+            min_reward_risk=_float(
+                merged.get("MIN_REWARD_RISK"),
+                float(profile_defaults["min_reward_risk"]),
+            ),
+            target_selection=merged.get(
+                "TARGET_SELECTION",
+                str(profile_defaults["target_selection"]),
+            )
+            .strip()
+            .lower(),
+            confirmation_policy=merged.get(
+                "CONFIRMATION_POLICY",
+                str(profile_defaults["confirmation_policy"]),
+            )
+            .strip()
+            .lower(),
         )
         settings = cls(
             perps_env=perps_env,
@@ -136,6 +186,7 @@ class Settings:
                 "TELEGRAM_CHAT_ID",
             ),
             safety=safety,
+            strategy=strategy,
         )
         settings.validate_startup()
         return settings
@@ -159,6 +210,14 @@ class Settings:
             raise ConfigurationError("DEFAULT_NOTIONAL_USDT cannot exceed MAX_NOTIONAL_USDT")
         if self.safety.max_leverage < 1:
             raise ConfigurationError("MAX_LEVERAGE must be >= 1")
+        if self.strategy.profile not in {"conservative", "demo_learning"}:
+            raise ConfigurationError("STRATEGY_PROFILE must be one of: conservative, demo_learning")
+        if self.strategy.min_reward_risk <= 0:
+            raise ConfigurationError("MIN_REWARD_RISK must be positive")
+        if self.strategy.target_selection not in {"first", "first_rr_qualified"}:
+            raise ConfigurationError("TARGET_SELECTION must be one of: first, first_rr_qualified")
+        if self.strategy.confirmation_policy not in {"two_5m", "one_5m"}:
+            raise ConfigurationError("CONFIRMATION_POLICY must be one of: two_5m, one_5m")
         if self.telegram_notifications_enabled and (not self.telegram_bot_token or not self.telegram_chat_id):
             raise ConfigurationError(
                 "Telegram notifications require TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID"
@@ -202,4 +261,5 @@ class Settings:
                 "max_open_positions": self.safety.max_open_positions,
                 "market_data_max_age_seconds": self.safety.market_data_max_age_seconds,
             },
+            "strategy": self.strategy.sanitized(),
         }

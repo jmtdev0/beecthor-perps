@@ -91,6 +91,8 @@ class PerpsEngine:
             {
                 "state": state.value,
                 "decision": decision.to_dict(),
+                "strategy": self.settings.strategy.sanitized(),
+                "selected_take_profit": decision.intent.take_profit if decision.intent else None,
                 "thesis_video_id": thesis.video_id,
                 "price": snapshot.price,
             },
@@ -166,6 +168,7 @@ class PerpsEngine:
             "state": state.value,
             "reason": reason,
             "thesis_video_id": thesis.video_id if thesis else "",
+            "strategy": self.settings.strategy.sanitized(),
         }
         self.decision_ledger.append("state", payload)
         return payload

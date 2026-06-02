@@ -25,6 +25,7 @@ def candle(minutes: int, high: float, low: float, close: float) -> Candle:
 class ConfirmationTests(unittest.TestCase):
     def setUp(self):
         self.settings = Settings.from_env(env={})
+        self.demo_learning_settings = Settings.from_env(env={"STRATEGY_PROFILE": "demo_learning"})
 
     def test_detects_clear_long_reclaim(self):
         thesis = BeecthorThesis(
@@ -102,6 +103,95 @@ class ConfirmationTests(unittest.TestCase):
 
         self.assertEqual(decision.action.value, "trade")
         self.assertEqual(decision.intent.direction.value, "short")
+
+    def test_conservative_requires_two_5m_candles(self):
+        thesis = BeecthorThesis(
+            video_id="abc123",
+            created_at="2026-05-31T10:00:00Z",
+            macro_bias="bearish",
+            preferred_setup="long_support_sweep_reclaim",
+            valid_until="2026-06-01T10:00:00Z",
+            confidence=0.8,
+            long_zones=[PriceZone(low=72700, high=73500, stop_loss=72000, targets=[75000, 78200], label="support")],
+        )
+        candles = [candle(0, high=73600, low=72950, close=73520)]
+
+        decision = evaluate_confirmed_thesis(
+            thesis,
+            MarketSnapshot.now("BTCUSDT", 73520),
+            candles,
+            self.settings,
+        )
+
+        self.assertEqual(decision.action.value, "wait")
+
+    def test_demo_learning_long_uses_first_target_that_meets_rr(self):
+        thesis = BeecthorThesis(
+            video_id="abc123",
+            created_at="2026-05-31T10:00:00Z",
+            macro_bias="bearish",
+            preferred_setup="long_support_sweep_reclaim",
+            valid_until="2026-06-01T10:00:00Z",
+            confidence=0.8,
+            long_zones=[PriceZone(low=72700, high=73500, stop_loss=72000, targets=[75000, 78200], label="support")],
+        )
+        candles = [candle(0, high=73600, low=72950, close=73520)]
+
+        decision = evaluate_confirmed_thesis(
+            thesis,
+            MarketSnapshot.now("BTCUSDT", 73520),
+            candles,
+            self.demo_learning_settings,
+        )
+
+        self.assertEqual(decision.action.value, "trade")
+        self.assertEqual(decision.intent.direction.value, "long")
+        self.assertEqual(decision.intent.take_profit, 78200)
+
+    def test_demo_learning_short_uses_first_target_that_meets_rr(self):
+        thesis = BeecthorThesis(
+            video_id="abc123",
+            created_at="2026-05-31T10:00:00Z",
+            macro_bias="bearish",
+            preferred_setup="short_resistance_bearish_regime",
+            valid_until="2026-06-01T10:00:00Z",
+            confidence=0.8,
+            short_zones=[PriceZone(low=72000, high=74000, stop_loss=76500, targets=[68000, 65000], label="resistance")],
+        )
+        candles = [candle(0, high=72500, low=70900, close=71000)]
+
+        decision = evaluate_confirmed_thesis(
+            thesis,
+            MarketSnapshot.now("BTCUSDT", 71000),
+            candles,
+            self.demo_learning_settings,
+        )
+
+        self.assertEqual(decision.action.value, "trade")
+        self.assertEqual(decision.intent.direction.value, "short")
+        self.assertEqual(decision.intent.take_profit, 65000)
+
+    def test_demo_learning_rejects_when_no_target_meets_rr(self):
+        thesis = BeecthorThesis(
+            video_id="abc123",
+            created_at="2026-05-31T10:00:00Z",
+            macro_bias="bearish",
+            preferred_setup="short_resistance_bearish_regime",
+            valid_until="2026-06-01T10:00:00Z",
+            confidence=0.8,
+            short_zones=[PriceZone(low=72000, high=74000, stop_loss=76500, targets=[68000], label="resistance")],
+        )
+        candles = [candle(0, high=72500, low=70900, close=71000)]
+
+        decision = evaluate_confirmed_thesis(
+            thesis,
+            MarketSnapshot.now("BTCUSDT", 71000),
+            candles,
+            self.demo_learning_settings,
+        )
+
+        self.assertEqual(decision.action.value, "reject")
+        self.assertEqual(decision.reason, "No take-profit target reaches 1.0R")
 
 
 if __name__ == "__main__":

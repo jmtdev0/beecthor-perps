@@ -9,6 +9,42 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.perps_env, "shadow")
         self.assertEqual(settings.broker, "paper")
         self.assertFalse(settings.is_real_money)
+        self.assertEqual(settings.strategy.profile, "conservative")
+        self.assertEqual(settings.strategy.min_reward_risk, 1.5)
+        self.assertEqual(settings.strategy.target_selection, "first")
+        self.assertEqual(settings.strategy.confirmation_policy, "two_5m")
+
+    def test_demo_learning_strategy_defaults_are_more_active(self):
+        settings = Settings.from_env(env={"STRATEGY_PROFILE": "demo_learning"})
+        self.assertEqual(settings.strategy.profile, "demo_learning")
+        self.assertEqual(settings.strategy.min_reward_risk, 1.0)
+        self.assertEqual(settings.strategy.target_selection, "first_rr_qualified")
+        self.assertEqual(settings.strategy.confirmation_policy, "one_5m")
+
+    def test_strategy_overrides_are_supported(self):
+        settings = Settings.from_env(
+            env={
+                "STRATEGY_PROFILE": "demo_learning",
+                "MIN_REWARD_RISK": "1.3",
+                "TARGET_SELECTION": "first",
+                "CONFIRMATION_POLICY": "two_5m",
+            }
+        )
+        self.assertEqual(settings.strategy.min_reward_risk, 1.3)
+        self.assertEqual(settings.strategy.target_selection, "first")
+        self.assertEqual(settings.strategy.confirmation_policy, "two_5m")
+
+    def test_rejects_invalid_strategy_settings(self):
+        invalid_envs = [
+            {"STRATEGY_PROFILE": "turbo"},
+            {"MIN_REWARD_RISK": "0"},
+            {"TARGET_SELECTION": "last"},
+            {"CONFIRMATION_POLICY": "tick"},
+        ]
+        for env in invalid_envs:
+            with self.subTest(env=env):
+                with self.assertRaises(ConfigurationError):
+                    Settings.from_env(env=env)
 
     def test_mainnet_requires_ack_and_subaccount(self):
         with self.assertRaises(ConfigurationError):

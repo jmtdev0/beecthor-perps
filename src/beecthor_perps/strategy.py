@@ -5,7 +5,6 @@ from .models import BeecthorThesis, Candle, Decision, DecisionAction, Direction,
 from .safety import validate_market_snapshot, validate_order_intent
 
 
-MIN_REWARD_RISK = 1.5
 SHORT_SETUPS = {"short_resistance", "short_rejection", "short_resistance_bearish_regime"}
 LONG_SETUPS = {"long_support", "sweep_reclaim_long", "long_support_sweep_reclaim"}
 
@@ -24,6 +23,47 @@ def _first_target(zone: PriceZone, direction: Direction) -> float | None:
     return max(viable) if viable else None
 
 
+def _first_rr_qualified_target(
+    *,
+    zone: PriceZone,
+    direction: Direction,
+    entry: float,
+    minimum: float,
+) -> float | None:
+    for target in zone.targets:
+        if direction == Direction.LONG and target <= zone.high:
+            continue
+        if direction == Direction.SHORT and target >= zone.low:
+            continue
+        if _has_reward_risk(
+            entry=entry,
+            stop_loss=zone.stop_loss,
+            take_profit=target,
+            direction=direction,
+            minimum=minimum,
+        ):
+            return target
+    return None
+
+
+def _select_take_profit(
+    *,
+    zone: PriceZone,
+    direction: Direction,
+    entry: float,
+    min_reward_risk: float | None,
+    target_selection: str,
+) -> float | None:
+    if target_selection == "first_rr_qualified" and min_reward_risk is not None:
+        return _first_rr_qualified_target(
+            zone=zone,
+            direction=direction,
+            entry=entry,
+            minimum=min_reward_risk,
+        )
+    return _first_target(zone, direction)
+
+
 def _build_intent(
     *,
     thesis: BeecthorThesis,
@@ -33,9 +73,18 @@ def _build_intent(
     zone: PriceZone,
     reason: str,
     min_reward_risk: float | None = None,
+    target_selection: str = "first",
 ) -> Decision:
-    take_profit = _first_target(zone, direction)
+    take_profit = _select_take_profit(
+        zone=zone,
+        direction=direction,
+        entry=snapshot.price,
+        min_reward_risk=min_reward_risk,
+        target_selection=target_selection,
+    )
     if take_profit is None:
+        if target_selection == "first_rr_qualified" and min_reward_risk is not None:
+            return Decision(DecisionAction.REJECT, f"No take-profit target reaches {min_reward_risk:.1f}R")
         return Decision(DecisionAction.REJECT, "No viable take-profit target in thesis zone")
     if min_reward_risk is not None and not _has_reward_risk(
         entry=snapshot.price,
@@ -104,6 +153,15 @@ def _long_reclaim_is_clear(zone: PriceZone, candles: list[Candle]) -> bool:
     )
 
 
+def _long_one_5m_reclaim_is_clear(zone: PriceZone, candles: list[Candle]) -> bool:
+    closed = _closed(candles)[-4:]
+    if len(closed) < 1:
+        return False
+    reclaim_candle = closed[-1]
+    touched_zone = any(candle.low <= zone.high for candle in closed)
+    return touched_zone and reclaim_candle.close > zone.high
+
+
 def _short_rejection_is_clear(zone: PriceZone, candles: list[Candle]) -> bool:
     closed = _closed(candles)[-4:]
     if len(closed) < 2:
@@ -118,6 +176,27 @@ def _short_rejection_is_clear(zone: PriceZone, candles: list[Candle]) -> bool:
         and hold_candle.close < zone.low
         and hold_candle.high < sweep_high
     )
+
+
+def _short_one_5m_rejection_is_clear(zone: PriceZone, candles: list[Candle]) -> bool:
+    closed = _closed(candles)[-4:]
+    if len(closed) < 1:
+        return False
+    rejection_candle = closed[-1]
+    touched_zone = any(candle.high >= zone.low for candle in closed)
+    return touched_zone and rejection_candle.close < zone.low
+
+
+def _long_confirmation_is_clear(zone: PriceZone, candles: list[Candle], settings: Settings) -> bool:
+    if settings.strategy.confirmation_policy == "one_5m":
+        return _long_one_5m_reclaim_is_clear(zone, candles)
+    return _long_reclaim_is_clear(zone, candles)
+
+
+def _short_confirmation_is_clear(zone: PriceZone, candles: list[Candle], settings: Settings) -> bool:
+    if settings.strategy.confirmation_policy == "one_5m":
+        return _short_one_5m_rejection_is_clear(zone, candles)
+    return _short_rejection_is_clear(zone, candles)
 
 
 def evaluate_thesis(thesis: BeecthorThesis, snapshot: MarketSnapshot, settings: Settings) -> Decision:
@@ -174,7 +253,7 @@ def evaluate_confirmed_thesis(
         if thesis.macro_bias not in {"bearish", "mixed", "neutral", "unknown"}:
             return Decision(DecisionAction.WAIT, "Short setup contradicts macro bias")
         for zone in thesis.short_zones:
-            if _short_rejection_is_clear(zone, candles):
+            if _short_confirmation_is_clear(zone, candles, settings):
                 return _build_intent(
                     thesis=thesis,
                     snapshot=snapshot,
@@ -182,13 +261,14 @@ def evaluate_confirmed_thesis(
                     direction=Direction.SHORT,
                     zone=zone,
                     reason=f"Clear 5m rejection from Beecthor short zone: {zone.label or zone.low}",
-                    min_reward_risk=MIN_REWARD_RISK,
+                    min_reward_risk=settings.strategy.min_reward_risk,
+                    target_selection=settings.strategy.target_selection,
                 )
         return Decision(DecisionAction.WAIT, "No clear 5m short rejection yet")
 
     if thesis.preferred_setup in LONG_SETUPS:
         for zone in thesis.long_zones:
-            if _long_reclaim_is_clear(zone, candles):
+            if _long_confirmation_is_clear(zone, candles, settings):
                 return _build_intent(
                     thesis=thesis,
                     snapshot=snapshot,
@@ -196,7 +276,8 @@ def evaluate_confirmed_thesis(
                     direction=Direction.LONG,
                     zone=zone,
                     reason=f"Clear 5m reclaim from Beecthor long zone: {zone.label or zone.low}",
-                    min_reward_risk=MIN_REWARD_RISK,
+                    min_reward_risk=settings.strategy.min_reward_risk,
+                    target_selection=settings.strategy.target_selection,
                 )
         return Decision(DecisionAction.WAIT, "No clear 5m long reclaim yet")
 
