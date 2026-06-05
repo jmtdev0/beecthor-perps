@@ -132,12 +132,15 @@ class Settings:
             },
         }
         profile_defaults = strategy_defaults.get(strategy_profile, strategy_defaults["conservative"])
+        default_notional = _first_present(merged, "DEFAULT_NOTIONAL_USDC", "DEFAULT_NOTIONAL_USDT")
+        max_notional = _first_present(merged, "MAX_NOTIONAL_USDC", "MAX_NOTIONAL_USDT")
+        daily_loss_limit = _first_present(merged, "DAILY_LOSS_LIMIT_USDC", "DAILY_LOSS_LIMIT_USDT")
         safety = SafetyLimits(
-            symbol_allowlist=_csv(merged.get("SYMBOL_ALLOWLIST"), {"BTCUSDT"}),
-            default_notional_usdt=_float(merged.get("DEFAULT_NOTIONAL_USDT"), 100.0),
-            max_notional_usdt=_float(merged.get("MAX_NOTIONAL_USDT"), 125.0),
-            max_leverage=_int(merged.get("MAX_LEVERAGE"), 3),
-            daily_loss_limit_usdt=_float(merged.get("DAILY_LOSS_LIMIT_USDT"), 25.0),
+            symbol_allowlist=_csv(merged.get("SYMBOL_ALLOWLIST"), {"BTCUSDC"}),
+            default_notional_usdt=_float(default_notional, 100.0),
+            max_notional_usdt=_float(max_notional, 150.0),
+            max_leverage=_int(merged.get("MAX_LEVERAGE"), 5),
+            daily_loss_limit_usdt=_float(daily_loss_limit, 25.0),
             max_open_positions=_int(merged.get("MAX_OPEN_POSITIONS"), 1),
             market_data_max_age_seconds=_int(merged.get("MARKET_DATA_MAX_AGE_SECONDS"), 20),
         )
@@ -203,11 +206,11 @@ class Settings:
         if not self.safety.symbol_allowlist:
             raise ConfigurationError("SYMBOL_ALLOWLIST cannot be empty")
         if self.safety.default_notional_usdt <= 0:
-            raise ConfigurationError("DEFAULT_NOTIONAL_USDT must be positive")
+            raise ConfigurationError("DEFAULT_NOTIONAL_USDC/USDT must be positive")
         if self.safety.max_notional_usdt <= 0:
-            raise ConfigurationError("MAX_NOTIONAL_USDT must be positive")
+            raise ConfigurationError("MAX_NOTIONAL_USDC/USDT must be positive")
         if self.safety.default_notional_usdt > self.safety.max_notional_usdt:
-            raise ConfigurationError("DEFAULT_NOTIONAL_USDT cannot exceed MAX_NOTIONAL_USDT")
+            raise ConfigurationError("DEFAULT_NOTIONAL_USDC/USDT cannot exceed MAX_NOTIONAL_USDC/USDT")
         if self.safety.max_leverage < 1:
             raise ConfigurationError("MAX_LEVERAGE must be >= 1")
         if self.strategy.profile not in {"conservative", "demo_learning"}:

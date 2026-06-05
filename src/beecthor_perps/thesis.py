@@ -11,6 +11,9 @@ class ThesisError(ValueError):
     """Raised when the Beecthor perps thesis cannot be used safely."""
 
 
+SUPPORTED_THESIS_SYMBOLS = {"BTCUSDT", "BTCUSDC"}
+
+
 def _parse_utc(value: str) -> datetime:
     if not value:
         raise ThesisError("Thesis valid_until is missing")
@@ -38,7 +41,7 @@ def load_thesis_file(path: Path) -> BeecthorThesis:
 def validate_thesis(thesis: BeecthorThesis, now: datetime | None = None) -> None:
     if thesis.schema_version != 1:
         raise ThesisError(f"Unsupported thesis schema_version: {thesis.schema_version}")
-    if thesis.symbol != "BTCUSDT":
+    if thesis.symbol not in SUPPORTED_THESIS_SYMBOLS:
         raise ThesisError(f"Unsupported thesis symbol: {thesis.symbol}")
     if not thesis.video_id:
         raise ThesisError("Thesis video_id is missing")

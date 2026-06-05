@@ -31,6 +31,27 @@ class ThesisTests(unittest.TestCase):
         self.assertEqual(thesis.video_id, "abc123")
         self.assertEqual(thesis.symbol, "BTCUSDT")
 
+    def test_loads_valid_btcusdc_thesis(self):
+        valid_until = (datetime.now(UTC) + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+        payload = {
+            "schema_version": 1,
+            "symbol": "BTCUSDC",
+            "video_id": "abc123",
+            "created_at": "2026-05-31T10:00:00Z",
+            "valid_until": valid_until,
+            "macro_bias": "bearish",
+            "preferred_setup": "wait",
+            "confidence": 0.0,
+            "long_zones": [],
+            "short_zones": [],
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "latest.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            thesis = load_thesis_file(path)
+
+        self.assertEqual(thesis.symbol, "BTCUSDC")
+
     def test_rejects_expired_thesis(self):
         payload = {
             "schema_version": 1,

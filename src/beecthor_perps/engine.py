@@ -27,7 +27,7 @@ class PerpsEngine:
         thesis_file: Path,
         decision_ledger: JsonlLedger,
         active_trade_store: ActiveTradeStore,
-        symbol: str = "BTCUSDT",
+        symbol: str = "BTCUSDC",
     ) -> None:
         self.settings = settings
         self.broker = broker

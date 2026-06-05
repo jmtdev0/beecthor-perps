@@ -46,7 +46,7 @@ class BeecthorThesis:
     valid_until: str
     confidence: float
     schema_version: int = 1
-    symbol: str = "BTCUSDT"
+    symbol: str = "BTCUSDC"
     generated_at: str = ""
     short_zones: list[PriceZone] = field(default_factory=list)
     long_zones: list[PriceZone] = field(default_factory=list)
@@ -78,7 +78,7 @@ class BeecthorThesis:
             valid_until=str(payload.get("valid_until", "")),
             confidence=float(payload.get("confidence", 0.0)),
             schema_version=int(payload.get("schema_version", 1)),
-            symbol=str(payload.get("symbol", "BTCUSDT")).upper(),
+            symbol=str(payload.get("symbol", "BTCUSDC")).upper(),
             generated_at=str(payload.get("generated_at", "")),
             short_zones=zones("short_zones"),
             long_zones=zones("long_zones"),

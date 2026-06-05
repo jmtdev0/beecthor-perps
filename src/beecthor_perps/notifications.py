@@ -12,6 +12,14 @@ from .config import Settings
 from .models import OrderIntent
 
 
+def quote_asset(symbol: str) -> str:
+    if symbol.upper().endswith("USDC"):
+        return "USDC"
+    if symbol.upper().endswith("USDT"):
+        return "USDT"
+    return "quote"
+
+
 def _utc_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -83,6 +91,7 @@ class TelegramNotifier:
 
 
 def format_open_position_message(intent: OrderIntent, settings: Settings, setup: str) -> str:
+    quote = quote_asset(intent.symbol)
     return "\n".join(
         [
             "🟢 <b>Beecthor Perps: posición abierta</b>",
@@ -90,7 +99,7 @@ def format_open_position_message(intent: OrderIntent, settings: Settings, setup:
             f"Símbolo: <b>{intent.symbol}</b>",
             f"Dirección: <b>{intent.direction.value.upper()}</b>",
             f"Cantidad: <b>{intent.quantity:g}</b>",
-            f"Notional aprox.: <b>{intent.notional_usdt:.2f} USDT</b>",
+            f"Notional aprox.: <b>{intent.notional_usdt:.2f} {quote}</b>",
             f"Leverage: <b>{intent.leverage}x</b>",
             f"Entrada ref.: <b>{intent.entry_price_reference:.2f}</b>",
             f"Stop: <b>{intent.stop_loss:.2f}</b>",

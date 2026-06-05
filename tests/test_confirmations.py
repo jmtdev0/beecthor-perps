@@ -10,7 +10,7 @@ def candle(minutes: int, high: float, low: float, close: float) -> Candle:
     base = datetime(2026, 5, 31, 10, 0, tzinfo=UTC)
     open_time = base + timedelta(minutes=minutes)
     return Candle(
-        symbol="BTCUSDT",
+        symbol="BTCUSDC",
         interval="5m",
         open_time=open_time,
         open=close,
@@ -45,7 +45,7 @@ class ConfirmationTests(unittest.TestCase):
 
         decision = evaluate_confirmed_thesis(
             thesis,
-            MarketSnapshot.now("BTCUSDT", 73700),
+            MarketSnapshot.now("BTCUSDC", 73700),
             candles,
             self.settings,
         )
@@ -71,7 +71,7 @@ class ConfirmationTests(unittest.TestCase):
 
         decision = evaluate_confirmed_thesis(
             thesis,
-            MarketSnapshot.now("BTCUSDT", 73700),
+            MarketSnapshot.now("BTCUSDC", 73700),
             candles,
             self.settings,
         )
@@ -96,7 +96,7 @@ class ConfirmationTests(unittest.TestCase):
 
         decision = evaluate_confirmed_thesis(
             thesis,
-            MarketSnapshot.now("BTCUSDT", 77700),
+            MarketSnapshot.now("BTCUSDC", 77700),
             candles,
             self.settings,
         )
@@ -118,7 +118,7 @@ class ConfirmationTests(unittest.TestCase):
 
         decision = evaluate_confirmed_thesis(
             thesis,
-            MarketSnapshot.now("BTCUSDT", 73520),
+            MarketSnapshot.now("BTCUSDC", 73520),
             candles,
             self.settings,
         )
@@ -139,7 +139,7 @@ class ConfirmationTests(unittest.TestCase):
 
         decision = evaluate_confirmed_thesis(
             thesis,
-            MarketSnapshot.now("BTCUSDT", 73520),
+            MarketSnapshot.now("BTCUSDC", 73520),
             candles,
             self.demo_learning_settings,
         )
@@ -162,7 +162,7 @@ class ConfirmationTests(unittest.TestCase):
 
         decision = evaluate_confirmed_thesis(
             thesis,
-            MarketSnapshot.now("BTCUSDT", 71000),
+            MarketSnapshot.now("BTCUSDC", 71000),
             candles,
             self.demo_learning_settings,
         )
@@ -185,7 +185,7 @@ class ConfirmationTests(unittest.TestCase):
 
         decision = evaluate_confirmed_thesis(
             thesis,
-            MarketSnapshot.now("BTCUSDT", 71000),
+            MarketSnapshot.now("BTCUSDC", 71000),
             candles,
             self.demo_learning_settings,
         )

@@ -141,6 +141,14 @@ class BinanceUsdMFuturesClient:
             signed=True,
         )
 
+    def open_orders(self, symbol: str) -> Any:
+        return self._request(
+            "GET",
+            "/fapi/v1/openOrders",
+            params={"symbol": symbol.upper()},
+            signed=True,
+        )
+
     def cancel_open_orders(self, symbol: str) -> Any:
         return self._request(
             "DELETE",
@@ -148,6 +156,17 @@ class BinanceUsdMFuturesClient:
             params={"symbol": symbol.upper()},
             signed=True,
         )
+
+    def set_leverage(self, symbol: str, leverage: int) -> Any:
+        return self._request(
+            "POST",
+            "/fapi/v1/leverage",
+            params={"symbol": symbol.upper(), "leverage": int(leverage)},
+            signed=True,
+        )
+
+    def exchange_info(self, symbol: str) -> Any:
+        return self._request("GET", "/fapi/v1/exchangeInfo", params={"symbol": symbol.upper()})
 
     def new_test_order(self, intent: OrderIntent) -> Any:
         validate_order_intent(intent, self.settings)
@@ -158,6 +177,7 @@ class BinanceUsdMFuturesClient:
         if self.settings.perps_env == "mainnet":
             raise RuntimeError("Mainnet order placement is intentionally not enabled in the first scaffold")
 
+        leverage_result = self.set_leverage(intent.symbol, intent.leverage)
         entry = self._request("POST", "/fapi/v1/order", params=self._entry_order_params(intent), signed=True)
         stop = None
         take_profit = None
@@ -188,7 +208,7 @@ class BinanceUsdMFuturesClient:
                 close_result=close_result,
                 cancel_result=cancel_result,
             ) from exc
-        return {"ok": True, "entry": entry, "stop": stop, "take_profit": take_profit}
+        return {"ok": True, "leverage": leverage_result, "entry": entry, "stop": stop, "take_profit": take_profit}
 
     def close_position_market(self, intent: OrderIntent) -> Any:
         if self.settings.perps_env == "mainnet":

@@ -149,10 +149,10 @@ El sistema debe responder `WAIT` si:
 
 Limites iniciales:
 
-- Symbol allowlist: `BTCUSDT`.
+- Symbol allowlist: `BTCUSDC`.
 - Modo: isolated.
 - Max posiciones abiertas: `1`.
-- Leverage inicial: `2x-3x`.
+- Leverage inicial: hasta `5x` solo en Demo.
 - Prohibido `10x/20x` en real hasta tener estadistica robusta.
 - Stop obligatorio.
 - Take-profit obligatorio.

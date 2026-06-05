@@ -26,7 +26,7 @@ class SafetyTests(unittest.TestCase):
 
     def test_rejects_invalid_short_stop_direction(self):
         intent = OrderIntent(
-            symbol="BTCUSDT",
+            symbol="BTCUSDC",
             direction=Direction.SHORT,
             quantity=0.01,
             notional_usdt=25,

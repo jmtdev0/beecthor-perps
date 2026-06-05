@@ -1,6 +1,6 @@
 # Beecthor Perps
 
-Dedicated automation workspace for testing Beecthor-derived BTCUSDT perpetual futures strategies.
+Dedicated automation workspace for testing Beecthor-derived BTCUSDC perpetual futures strategies.
 
 The repo is intentionally conservative:
 
@@ -8,7 +8,7 @@ The repo is intentionally conservative:
 - `testnet` must be explicit.
 - `mainnet` is blocked unless a dedicated subaccount and real-money acknowledgement are configured.
 - Strategy output is an order intent, not an order, until it passes deterministic safety checks.
-- BTCUSDT order size starts at the practical minimum of `0.001 BTC`; keep `MAX_NOTIONAL_USDT` aligned with current BTC price.
+- BTCUSDC order size starts at the practical minimum that satisfies Binance Demo filters; at recent BTC prices this is usually `0.002 BTC`.
 
 ## Quick Start
 
@@ -55,12 +55,12 @@ Telegram notifications reuse the existing BeecthorDaily bot through `TELEGRAM_BO
 The bot must refuse to trade when any of these are true:
 
 - symbol is outside `SYMBOL_ALLOWLIST`
-- notional is above `MAX_NOTIONAL_USDT`
+- notional is above `MAX_NOTIONAL_USDC`
 - leverage is above `MAX_LEVERAGE`
 - stop loss or take profit is missing
 - stop/take-profit direction is invalid
 - there is already an open position beyond `MAX_OPEN_POSITIONS`
-- daily realized loss is beyond `DAILY_LOSS_LIMIT_USDT`
+- daily realized loss is beyond `DAILY_LOSS_LIMIT_USDC`
 - mainnet is selected without the subaccount guard and acknowledgement
 
 ## Playbook

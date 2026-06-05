@@ -9,6 +9,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.perps_env, "shadow")
         self.assertEqual(settings.broker, "paper")
         self.assertFalse(settings.is_real_money)
+        self.assertEqual(settings.safety.symbol_allowlist, {"BTCUSDC"})
+        self.assertEqual(settings.safety.max_leverage, 5)
         self.assertEqual(settings.strategy.profile, "conservative")
         self.assertEqual(settings.strategy.min_reward_risk, 1.5)
         self.assertEqual(settings.strategy.target_selection, "first")
@@ -33,6 +35,21 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.strategy.min_reward_risk, 1.3)
         self.assertEqual(settings.strategy.target_selection, "first")
         self.assertEqual(settings.strategy.confirmation_policy, "two_5m")
+
+    def test_usdc_notional_aliases_are_supported(self):
+        settings = Settings.from_env(
+            env={
+                "DEFAULT_NOTIONAL_USDT": "50",
+                "MAX_NOTIONAL_USDT": "75",
+                "DAILY_LOSS_LIMIT_USDT": "10",
+                "DEFAULT_NOTIONAL_USDC": "100",
+                "MAX_NOTIONAL_USDC": "150",
+                "DAILY_LOSS_LIMIT_USDC": "25",
+            }
+        )
+        self.assertEqual(settings.safety.default_notional_usdt, 100)
+        self.assertEqual(settings.safety.max_notional_usdt, 150)
+        self.assertEqual(settings.safety.daily_loss_limit_usdt, 25)
 
     def test_rejects_invalid_strategy_settings(self):
         invalid_envs = [

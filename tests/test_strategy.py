@@ -19,7 +19,7 @@ class StrategyTests(unittest.TestCase):
                 ],
             }
         )
-        decision = evaluate_thesis(thesis, MarketSnapshot.now("BTCUSDT", 78200), settings)
+        decision = evaluate_thesis(thesis, MarketSnapshot.now("BTCUSDC", 78200), settings)
         self.assertEqual(decision.action, DecisionAction.TRADE)
         self.assertIsNotNone(decision.intent)
         self.assertEqual(decision.intent.direction.value, "short")
@@ -37,7 +37,7 @@ class StrategyTests(unittest.TestCase):
                 ],
             }
         )
-        decision = evaluate_thesis(thesis, MarketSnapshot.now("BTCUSDT", 77000), settings)
+        decision = evaluate_thesis(thesis, MarketSnapshot.now("BTCUSDC", 77000), settings)
         self.assertEqual(decision.action, DecisionAction.WAIT)
 
 
