@@ -123,8 +123,7 @@ def cmd_check_binance_demo(args: argparse.Namespace) -> int:
                 f"has_{args.symbol}_position_entry": any(pos.get("symbol") == args.symbol for pos in positions),
             }
         if item["name"] == f"public_exchange_info_{args.symbol.lower()}" and item.get("ok"):
-            symbols = (exchange_info or {}).get("symbols") or []
-            symbol_info = symbols[0] if symbols else {}
+            symbol_info = _symbol_info(exchange_info or {}, args.symbol)
             item["result"] = {
                 "symbol": symbol_info.get("symbol"),
                 "status": symbol_info.get("status"),
@@ -186,9 +185,16 @@ def _position_amount(account: dict[str, Any], symbol: str) -> float:
 
 
 def _symbol_filters(exchange_info: dict[str, Any], symbol: str) -> dict[str, dict[str, str]]:
-    symbols = exchange_info.get("symbols") or []
-    symbol_info = next((item for item in symbols if item.get("symbol") == symbol), symbols[0] if symbols else {})
+    symbol_info = _symbol_info(exchange_info, symbol)
     return {item.get("filterType", ""): item for item in symbol_info.get("filters", [])}
+
+
+def _symbol_info(exchange_info: dict[str, Any], symbol: str) -> dict[str, Any]:
+    symbols = exchange_info.get("symbols") or []
+    symbol_info = next((item for item in symbols if item.get("symbol") == symbol), None)
+    if symbol_info is None:
+        raise ValueError(f"Exchange info did not include {symbol}")
+    return symbol_info
 
 
 def _ceil_to_step(value: Decimal, step: Decimal) -> Decimal:
