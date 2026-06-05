@@ -228,7 +228,7 @@ def _manual_active_payload(intent: OrderIntent, result: dict[str, Any], label: s
     entry = result.get("entry") or {}
     stop = result.get("stop") or {}
     take_profit = result.get("take_profit") or {}
-    entry_order_id = entry.get("orderId", "unknown")
+    entry_order_id = _order_identifier(entry) or "unknown"
     return {
         "trade_id": f"{label}:{intent.symbol}:{intent.direction.value}:{entry_order_id}",
         "opened_at": utc_now_iso(),
@@ -239,8 +239,10 @@ def _manual_active_payload(intent: OrderIntent, result: dict[str, Any], label: s
         "leverage": intent.leverage,
         "source_video_id": label,
         "entry_order_id": entry_order_id,
-        "stop_order_id": stop.get("orderId"),
-        "take_profit_order_id": take_profit.get("orderId"),
+        "stop_order_id": _order_identifier(stop),
+        "take_profit_order_id": _order_identifier(take_profit),
+        "stop_order_kind": _order_kind(stop),
+        "take_profit_order_kind": _order_kind(take_profit),
         "stop_loss": intent.stop_loss,
         "take_profit": intent.take_profit,
         "label": label,
@@ -264,6 +266,18 @@ def _intent_payload(intent: OrderIntent) -> dict[str, Any]:
     }
 
 
+def _order_identifier(payload: dict[str, Any]) -> Any:
+    return payload.get("orderId") or payload.get("algoId")
+
+
+def _order_kind(payload: dict[str, Any]) -> str:
+    if payload.get("algoId"):
+        return "algo"
+    if payload.get("orderId"):
+        return "order"
+    return ""
+
+
 def cmd_open_manual(args: argparse.Namespace) -> int:
     settings = _settings(args)
     if settings.broker != "binance" or settings.perps_env != "testnet":
@@ -283,6 +297,9 @@ def cmd_open_manual(args: argparse.Namespace) -> int:
     open_orders = client.open_orders(symbol)
     if open_orders:
         raise SystemExit(f"Refusing manual order: {symbol} has {len(open_orders)} open orders")
+    open_algo_orders = client.open_algo_orders(symbol)
+    if open_algo_orders:
+        raise SystemExit(f"Refusing manual order: {symbol} has {len(open_algo_orders)} open algo orders")
 
     price = client.ticker_price(symbol)
     direction = Direction(args.direction)

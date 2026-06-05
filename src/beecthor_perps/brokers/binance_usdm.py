@@ -32,12 +32,15 @@ class ProtectiveOrderFailure(RuntimeError):
         self.cancel_result = cancel_result
 
     def sanitized(self) -> dict[str, Any]:
+        def order_id(payload: Any) -> Any:
+            if not isinstance(payload, dict):
+                return None
+            return payload.get("orderId") or payload.get("algoId")
+
         return {
-            "entry_order_id": (self.entry or {}).get("orderId") if isinstance(self.entry, dict) else None,
-            "stop_order_id": (self.stop or {}).get("orderId") if isinstance(self.stop, dict) else None,
-            "take_profit_order_id": (
-                (self.take_profit or {}).get("orderId") if isinstance(self.take_profit, dict) else None
-            ),
+            "entry_order_id": order_id(self.entry),
+            "stop_order_id": order_id(self.stop),
+            "take_profit_order_id": order_id(self.take_profit),
             "close_attempted": self.close_result is not None,
             "cancel_attempted": self.cancel_result is not None,
         }
@@ -94,7 +97,10 @@ class BinanceUsdMFuturesClient:
             headers=headers,
             timeout=self.timeout_seconds,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise requests.HTTPError(f"{exc}; body={response.text[:500]}", response=response) from exc
         if not response.text:
             return {}
         return response.json()
@@ -149,10 +155,34 @@ class BinanceUsdMFuturesClient:
             signed=True,
         )
 
+    def open_algo_orders(self, symbol: str) -> Any:
+        return self._request(
+            "GET",
+            "/fapi/v1/openAlgoOrders",
+            params={"symbol": symbol.upper()},
+            signed=True,
+        )
+
+    def all_algo_orders(self, symbol: str, limit: int = 30) -> Any:
+        return self._request(
+            "GET",
+            "/fapi/v1/allAlgoOrders",
+            params={"symbol": symbol.upper(), "limit": limit},
+            signed=True,
+        )
+
     def cancel_open_orders(self, symbol: str) -> Any:
         return self._request(
             "DELETE",
             "/fapi/v1/allOpenOrders",
+            params={"symbol": symbol.upper()},
+            signed=True,
+        )
+
+    def cancel_open_algo_orders(self, symbol: str) -> Any:
+        return self._request(
+            "DELETE",
+            "/fapi/v1/algoOpenOrders",
             params={"symbol": symbol.upper()},
             signed=True,
         )
@@ -182,11 +212,11 @@ class BinanceUsdMFuturesClient:
         stop = None
         take_profit = None
         try:
-            stop = self._request("POST", "/fapi/v1/order", params=self._stop_order_params(intent), signed=True)
+            stop = self._request("POST", "/fapi/v1/algoOrder", params=self._stop_algo_params(intent), signed=True)
             take_profit = self._request(
                 "POST",
-                "/fapi/v1/order",
-                params=self._take_profit_order_params(intent),
+                "/fapi/v1/algoOrder",
+                params=self._take_profit_algo_params(intent),
                 signed=True,
             )
         except Exception as exc:
@@ -197,7 +227,10 @@ class BinanceUsdMFuturesClient:
             except Exception as close_exc:
                 close_result = {"ok": False, "error": f"{type(close_exc).__name__}: {close_exc}"}
             try:
-                cancel_result = self.cancel_open_orders(intent.symbol)
+                cancel_result = {
+                    "orders": self.cancel_open_orders(intent.symbol),
+                    "algo_orders": self.cancel_open_algo_orders(intent.symbol),
+                }
             except Exception as cancel_exc:
                 cancel_result = {"ok": False, "error": f"{type(cancel_exc).__name__}: {cancel_exc}"}
             raise ProtectiveOrderFailure(
@@ -234,22 +267,26 @@ class BinanceUsdMFuturesClient:
             "quantity": self._format_quantity(intent.quantity),
         }
 
-    def _stop_order_params(self, intent: OrderIntent) -> dict[str, Any]:
+    def _stop_algo_params(self, intent: OrderIntent) -> dict[str, Any]:
         return {
+            "algoType": "CONDITIONAL",
             "symbol": intent.symbol,
             "side": intent.exit_side,
+            "positionSide": "BOTH",
             "type": "STOP_MARKET",
-            "stopPrice": self._format_price(intent.stop_loss),
+            "triggerPrice": self._format_price(intent.stop_loss),
             "closePosition": "true",
             "workingType": "MARK_PRICE",
         }
 
-    def _take_profit_order_params(self, intent: OrderIntent) -> dict[str, Any]:
+    def _take_profit_algo_params(self, intent: OrderIntent) -> dict[str, Any]:
         return {
+            "algoType": "CONDITIONAL",
             "symbol": intent.symbol,
             "side": intent.exit_side,
+            "positionSide": "BOTH",
             "type": "TAKE_PROFIT_MARKET",
-            "stopPrice": self._format_price(intent.take_profit),
+            "triggerPrice": self._format_price(intent.take_profit),
             "closePosition": "true",
             "workingType": "MARK_PRICE",
         }

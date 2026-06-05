@@ -141,7 +141,9 @@ class PerpsEngine:
             return {"state": EngineState.IN_POSITION.value, "symbol": symbol, "position_amt": amount}
 
         orders = self.broker.all_orders(symbol, limit=30)
-        classification = _classify_close(active_trade, orders)
+        algo_orders = self.broker.all_algo_orders(symbol, limit=30)
+        classification = _classify_close(active_trade, orders, algo_orders)
+        cleanup_result = _cleanup_open_orders(self.broker, symbol)
         event_id = f"position_closed:{active_trade.get('trade_id')}:{classification}"
         self.notifier.send_once(
             event_id,
@@ -153,7 +155,12 @@ class PerpsEngine:
         )
         self.decision_ledger.append(
             "position_closed",
-            {"state": EngineState.WAIT.value, "symbol": symbol, "classification": classification},
+            {
+                "state": EngineState.WAIT.value,
+                "symbol": symbol,
+                "classification": classification,
+                "cleanup": cleanup_result,
+            },
         )
         self.active_trade_store.clear()
         return {"state": EngineState.WAIT.value, "symbol": symbol, "classification": classification}
@@ -187,7 +194,7 @@ def _active_trade_payload(thesis: BeecthorThesis, decision: dict[str, Any], resu
     entry = result.get("entry") or {}
     stop = result.get("stop") or {}
     take_profit = result.get("take_profit") or {}
-    entry_order_id = entry.get("orderId", "unknown")
+    entry_order_id = _order_identifier(entry) or "unknown"
     trade_id = f"{thesis.video_id}:{intent.get('symbol')}:{intent.get('direction')}:{entry_order_id}"
     return {
         "trade_id": trade_id,
@@ -197,8 +204,10 @@ def _active_trade_payload(thesis: BeecthorThesis, decision: dict[str, Any], resu
         "quantity": intent.get("quantity"),
         "source_video_id": thesis.video_id,
         "entry_order_id": entry_order_id,
-        "stop_order_id": stop.get("orderId"),
-        "take_profit_order_id": take_profit.get("orderId"),
+        "stop_order_id": _order_identifier(stop),
+        "take_profit_order_id": _order_identifier(take_profit),
+        "stop_order_kind": _order_kind(stop),
+        "take_profit_order_kind": _order_kind(take_profit),
         "stop_loss": intent.get("stop_loss"),
         "take_profit": intent.get("take_profit"),
     }
@@ -207,9 +216,9 @@ def _active_trade_payload(thesis: BeecthorThesis, decision: dict[str, Any], resu
 def _sanitize_order_result(result: dict[str, Any]) -> dict[str, Any]:
     return {
         "ok": bool(result.get("ok")),
-        "entry_order_id": (result.get("entry") or {}).get("orderId"),
-        "stop_order_id": (result.get("stop") or {}).get("orderId"),
-        "take_profit_order_id": (result.get("take_profit") or {}).get("orderId"),
+        "entry_order_id": _order_identifier(result.get("entry") or {}),
+        "stop_order_id": _order_identifier(result.get("stop") or {}),
+        "take_profit_order_id": _order_identifier(result.get("take_profit") or {}),
     }
 
 
@@ -220,13 +229,53 @@ def _position_amount(account: dict[str, Any], symbol: str) -> float:
     return 0.0
 
 
-def _classify_close(active_trade: dict[str, Any], orders: list[dict[str, Any]]) -> str:
+def _order_identifier(payload: dict[str, Any]) -> Any:
+    return payload.get("orderId") or payload.get("algoId")
+
+
+def _order_kind(payload: dict[str, Any]) -> str:
+    if payload.get("algoId"):
+        return "algo"
+    if payload.get("orderId"):
+        return "order"
+    return ""
+
+
+def _cleanup_open_orders(broker: BinanceUsdMFuturesClient, symbol: str) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for label, fn in {
+        "orders": broker.cancel_open_orders,
+        "algo_orders": broker.cancel_open_algo_orders,
+    }.items():
+        try:
+            result[label] = fn(symbol)
+        except Exception as exc:
+            result[label] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    return result
+
+
+def _classify_close(
+    active_trade: dict[str, Any],
+    orders: list[dict[str, Any]],
+    algo_orders: list[dict[str, Any]] | None = None,
+) -> str:
     stop_id = str(active_trade.get("stop_order_id") or "")
     take_profit_id = str(active_trade.get("take_profit_order_id") or "")
     for order in orders:
         order_id = str(order.get("orderId") or "")
         status = str(order.get("status") or "").upper()
         if status != "FILLED":
+            continue
+        if order_id and order_id == take_profit_id:
+            return "take_profit"
+        if order_id and order_id == stop_id:
+            return "stop_loss"
+    for order in algo_orders or []:
+        order_id = str(order.get("algoId") or "")
+        status = str(order.get("algoStatus") or "").upper()
+        actual_order_id = str(order.get("actualOrderId") or "")
+        triggered = status in {"TRIGGERED", "FINISHED"} or bool(actual_order_id)
+        if not triggered:
             continue
         if order_id and order_id == take_profit_id:
             return "take_profit"

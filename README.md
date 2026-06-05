@@ -45,7 +45,7 @@ beecthor-perps status
 - waits for a closed 5m reclaim/rejection
 - validates reward/risk, stop, take-profit, notional, leverage, and symbol
 - places the entry only in Binance Demo/Testnet
-- immediately places exchange-native stop-loss and take-profit orders
+- immediately places exchange-native conditional algo stop-loss and take-profit orders
 - sends Telegram notifications for open, TP, SL, unknown close, and critical protection failures
 
 Telegram notifications reuse the existing BeecthorDaily bot through `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. Secrets stay in `.env`, never in Git.

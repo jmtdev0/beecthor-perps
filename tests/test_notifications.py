@@ -50,6 +50,22 @@ class NotificationTests(unittest.TestCase):
             "unknown",
         )
 
+    def test_classifies_algo_take_profit_and_stop_loss_closures(self):
+        active_trade = {"stop_order_id": 101, "take_profit_order_id": 202}
+
+        self.assertEqual(
+            _classify_close(active_trade, [], [{"algoId": 202, "algoStatus": "TRIGGERED"}]),
+            "take_profit",
+        )
+        self.assertEqual(
+            _classify_close(active_trade, [], [{"algoId": 101, "algoStatus": "FINISHED"}]),
+            "stop_loss",
+        )
+        self.assertEqual(
+            _classify_close(active_trade, [], [{"algoId": 202, "algoStatus": "NEW"}]),
+            "unknown",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
