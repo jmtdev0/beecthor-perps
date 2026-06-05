@@ -235,7 +235,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_engine.add_argument("--thesis", default="", help="Path to latest perps thesis JSON")
     run_engine.add_argument("--symbol", default="BTCUSDT", help="Futures symbol")
     run_engine.add_argument("--once", action="store_true", help="Run one engine iteration and exit")
-    run_engine.add_argument("--poll-seconds", default=60, type=int, help="Delay between engine iterations")
+    run_engine.add_argument("--poll-seconds", default=3600, type=int, help="Delay between engine iterations")
     run_engine.set_defaults(func=cmd_run_engine)
 
     return parser
