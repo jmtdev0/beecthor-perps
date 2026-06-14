@@ -135,6 +135,10 @@ class OrderIntent:
     def exit_side(self) -> str:
         return "SELL" if self.direction == Direction.LONG else "BUY"
 
+    @property
+    def hedge_position_side(self) -> str:
+        return "LONG" if self.direction == Direction.LONG else "SHORT"
+
 
 @dataclass(frozen=True)
 class Decision:

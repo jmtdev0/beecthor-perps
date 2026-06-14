@@ -5,7 +5,7 @@ from typing import Any
 
 from .brokers.binance_usdm import BinanceUsdMFuturesClient, ProtectiveOrderFailure
 from .config import Settings
-from .ledger import ActiveTradeStore, JsonlLedger, utc_now_iso
+from .ledger import ActiveTradesStore, JsonlLedger, utc_now_iso
 from .models import BeecthorThesis, DecisionAction, EngineState, MarketSnapshot
 from .notifications import (
     TelegramNotifier,
@@ -26,7 +26,7 @@ class PerpsEngine:
         notifier: TelegramNotifier,
         thesis_file: Path,
         decision_ledger: JsonlLedger,
-        active_trade_store: ActiveTradeStore,
+        active_trade_store: ActiveTradesStore,
         symbol: str = "BTCUSDC",
     ) -> None:
         self.settings = settings
@@ -38,9 +38,9 @@ class PerpsEngine:
         self.symbol = symbol.upper()
 
     def run_once(self) -> dict[str, Any]:
-        active_trade = self.active_trade_store.load()
-        if active_trade:
-            return self.reconcile_active_trade(active_trade)
+        active_trades = self.active_trade_store.load_all()
+        if active_trades:
+            return self.reconcile_active_trades(active_trades)
 
         try:
             thesis = load_thesis_file(self.thesis_file)
@@ -61,21 +61,21 @@ class PerpsEngine:
             return self._record_state(EngineState.DISABLED, "Configured broker is not Binance USD-M", thesis)
 
         account = self.broker.account()
-        external_position_amt = _position_amount(account, self.symbol)
-        if abs(external_position_amt) > 0:
+        external_positions = _symbol_position_amounts(account, self.symbol)
+        if any(abs(amount) > 0 for amount in external_positions.values()):
             self.decision_ledger.append(
                 "external_position_detected",
                 {
                     "state": EngineState.IN_POSITION.value,
                     "symbol": self.symbol,
-                    "position_amt": external_position_amt,
+                    "positions": external_positions,
                     "reason": "Existing exchange position detected without local active trade state",
                 },
             )
             return {
                 "state": EngineState.IN_POSITION.value,
                 "symbol": self.symbol,
-                "position_amt": external_position_amt,
+                "positions": external_positions,
                 "reason": "Existing exchange position detected; no new trade will be opened",
             }
 
@@ -113,8 +113,8 @@ class PerpsEngine:
             )
             return {"state": EngineState.DISABLED.value, "error": "protective_order_failure", "detail": detail}
 
-        active_payload = _active_trade_payload(thesis, decision.to_dict(), result)
-        self.active_trade_store.save(active_payload)
+        active_payload = _active_trade_payload(thesis, decision.to_dict(), result, self.settings.position_mode)
+        self.active_trade_store.add(active_payload)
         event_id = f"position_opened:{active_payload['trade_id']}"
         self.notifier.send_once(
             event_id,
@@ -126,44 +126,71 @@ class PerpsEngine:
         )
         return {"state": EngineState.IN_POSITION.value, "decision": decision.to_dict(), "result": _sanitize_order_result(result)}
 
-    def reconcile_active_trade(self, active_trade: dict[str, Any]) -> dict[str, Any]:
+    def reconcile_active_trades(self, active_trades: list[dict[str, Any]]) -> dict[str, Any]:
         if self.settings.broker != "binance" or not isinstance(self.broker, BinanceUsdMFuturesClient):
-            return self._record_state(EngineState.IN_POSITION, "Active trade exists; broker reconciliation unavailable")
+            return self._record_state(EngineState.IN_POSITION, "Active trades exist; broker reconciliation unavailable")
 
-        symbol = str(active_trade.get("symbol") or self.symbol).upper()
         account = self.broker.account()
-        amount = _position_amount(account, symbol)
-        if abs(amount) > 0:
-            self.decision_ledger.append(
-                "position_still_open",
-                {"state": EngineState.IN_POSITION.value, "symbol": symbol, "position_amt": amount},
-            )
-            return {"state": EngineState.IN_POSITION.value, "symbol": symbol, "position_amt": amount}
+        orders_by_symbol: dict[str, list[dict[str, Any]]] = {}
+        algo_by_symbol: dict[str, list[dict[str, Any]]] = {}
+        remaining: list[dict[str, Any]] = []
+        closed: list[dict[str, Any]] = []
 
-        orders = self.broker.all_orders(symbol, limit=30)
-        algo_orders = self.broker.all_algo_orders(symbol, limit=30)
-        classification = _classify_close(active_trade, orders, algo_orders)
-        cleanup_result = _cleanup_open_orders(self.broker, symbol)
-        event_id = f"position_closed:{active_trade.get('trade_id')}:{classification}"
-        self.notifier.send_once(
-            event_id,
-            format_close_position_message(
-                classification,
-                symbol,
-                str(active_trade.get("source_video_id", "")),
-            ),
-        )
+        for active_trade in active_trades:
+            symbol = str(active_trade.get("symbol") or self.symbol).upper()
+            if symbol not in orders_by_symbol:
+                orders_by_symbol[symbol] = self.broker.all_orders(symbol, limit=50)
+                algo_by_symbol[symbol] = self.broker.all_algo_orders(symbol, limit=50)
+
+            classification = _classify_close(active_trade, orders_by_symbol[symbol], algo_by_symbol[symbol])
+            if classification == "unknown":
+                position_side = str(active_trade.get("position_side") or "BOTH").upper()
+                amount = _position_amount(account, symbol, position_side)
+                if abs(amount) > 0:
+                    remaining.append(active_trade)
+                    continue
+                classification = "unknown_external_close"
+
+            cancel_result = _cancel_sibling_protection(self.broker, active_trade, classification)
+            closed_trade = {**active_trade, "status": "closed", "closed_at": utc_now_iso(), "classification": classification}
+            closed.append(closed_trade)
+            event_id = f"position_closed:{active_trade.get('trade_id')}:{classification}"
+            self.notifier.send_once(
+                event_id,
+                format_close_position_message(
+                    classification,
+                    symbol,
+                    str(active_trade.get("source_video_id", "")),
+                ),
+            )
+            self.decision_ledger.append(
+                "position_closed",
+                {
+                    "state": EngineState.WAIT.value,
+                    "symbol": symbol,
+                    "trade_id": active_trade.get("trade_id"),
+                    "classification": classification,
+                    "cancel_sibling": cancel_result,
+                },
+            )
+
+        if remaining:
+            self.active_trade_store.save_all(remaining)
+            self.decision_ledger.append(
+                "positions_still_open",
+                {"state": EngineState.IN_POSITION.value, "open_count": len(remaining), "closed_count": len(closed)},
+            )
+            return {"state": EngineState.IN_POSITION.value, "open_count": len(remaining), "closed_count": len(closed)}
+
+        self.active_trade_store.clear()
         self.decision_ledger.append(
-            "position_closed",
+            "all_positions_closed",
             {
                 "state": EngineState.WAIT.value,
-                "symbol": symbol,
-                "classification": classification,
-                "cleanup": cleanup_result,
+                "closed_count": len(closed),
             },
         )
-        self.active_trade_store.clear()
-        return {"state": EngineState.WAIT.value, "symbol": symbol, "classification": classification}
+        return {"state": EngineState.WAIT.value, "closed_count": len(closed)}
 
     def _record_state(
         self,
@@ -189,7 +216,12 @@ def _price_near_any_zone(thesis: BeecthorThesis, price: float) -> bool:
     return False
 
 
-def _active_trade_payload(thesis: BeecthorThesis, decision: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+def _active_trade_payload(
+    thesis: BeecthorThesis,
+    decision: dict[str, Any],
+    result: dict[str, Any],
+    position_mode: str,
+) -> dict[str, Any]:
     intent = decision.get("intent") or {}
     entry = result.get("entry") or {}
     stop = result.get("stop") or {}
@@ -199,9 +231,13 @@ def _active_trade_payload(thesis: BeecthorThesis, decision: dict[str, Any], resu
     return {
         "trade_id": trade_id,
         "opened_at": utc_now_iso(),
+        "status": "open",
         "symbol": intent.get("symbol"),
         "direction": intent.get("direction"),
+        "position_side": _active_position_side(intent.get("direction"), position_mode),
         "quantity": intent.get("quantity"),
+        "notional_usdc": intent.get("notional_usdt"),
+        "leverage": intent.get("leverage"),
         "source_video_id": thesis.video_id,
         "entry_order_id": entry_order_id,
         "stop_order_id": _order_identifier(stop),
@@ -213,6 +249,12 @@ def _active_trade_payload(thesis: BeecthorThesis, decision: dict[str, Any], resu
     }
 
 
+def _active_position_side(direction: Any, position_mode: str) -> str:
+    if position_mode != "hedge":
+        return "BOTH"
+    return "LONG" if direction == "long" else "SHORT"
+
+
 def _sanitize_order_result(result: dict[str, Any]) -> dict[str, Any]:
     return {
         "ok": bool(result.get("ok")),
@@ -222,11 +264,23 @@ def _sanitize_order_result(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _position_amount(account: dict[str, Any], symbol: str) -> float:
+def _position_amount(account: dict[str, Any], symbol: str, position_side: str = "BOTH") -> float:
     for position in account.get("positions", []) or []:
-        if position.get("symbol") == symbol:
+        if position.get("symbol") != symbol:
+            continue
+        reported_side = str(position.get("positionSide") or "BOTH").upper()
+        if position_side == "BOTH" or reported_side == position_side:
             return float(position.get("positionAmt") or 0)
     return 0.0
+
+
+def _symbol_position_amounts(account: dict[str, Any], symbol: str) -> dict[str, float]:
+    positions: dict[str, float] = {}
+    for position in account.get("positions", []) or []:
+        if position.get("symbol") == symbol:
+            side = str(position.get("positionSide") or "BOTH").upper()
+            positions[side] = float(position.get("positionAmt") or 0)
+    return positions or {"BOTH": 0.0}
 
 
 def _order_identifier(payload: dict[str, Any]) -> Any:
@@ -252,6 +306,62 @@ def _cleanup_open_orders(broker: BinanceUsdMFuturesClient, symbol: str) -> dict[
         except Exception as exc:
             result[label] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     return result
+
+
+def _cancel_sibling_protection(
+    broker: BinanceUsdMFuturesClient,
+    active_trade: dict[str, Any],
+    classification: str,
+) -> dict[str, Any]:
+    symbol = str(active_trade.get("symbol") or "").upper()
+    if not symbol:
+        return {"skipped": "missing_symbol"}
+    if classification == "take_profit":
+        return _cancel_trade_order(
+            broker,
+            symbol,
+            active_trade.get("stop_order_kind"),
+            active_trade.get("stop_order_id"),
+        )
+    if classification == "stop_loss":
+        return _cancel_trade_order(
+            broker,
+            symbol,
+            active_trade.get("take_profit_order_kind"),
+            active_trade.get("take_profit_order_id"),
+        )
+    if classification == "unknown_external_close":
+        return {
+            "stop": _cancel_trade_order(
+                broker,
+                symbol,
+                active_trade.get("stop_order_kind"),
+                active_trade.get("stop_order_id"),
+            ),
+            "take_profit": _cancel_trade_order(
+                broker,
+                symbol,
+                active_trade.get("take_profit_order_kind"),
+                active_trade.get("take_profit_order_id"),
+            ),
+        }
+    return {"skipped": classification}
+
+
+def _cancel_trade_order(
+    broker: BinanceUsdMFuturesClient,
+    symbol: str,
+    order_kind: Any,
+    order_id: Any,
+) -> dict[str, Any]:
+    if not order_id:
+        return {"skipped": "missing_order_id"}
+    try:
+        if str(order_kind or "").lower() == "algo":
+            return {"ok": True, "result": broker.cancel_algo_order(symbol, order_id)}
+        return {"ok": True, "result": broker.cancel_order(symbol, order_id)}
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
 def _classify_close(

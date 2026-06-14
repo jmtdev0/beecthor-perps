@@ -63,6 +63,7 @@ class BinanceUsdMFuturesClient:
             "broker": "binance_usdm",
             "perps_env": self.settings.perps_env,
             "base_url": self.base_url,
+            "configured_position_mode": self.settings.position_mode,
             "has_api_key": bool(self.api_key),
             "has_api_secret": bool(self.api_secret),
         }
@@ -113,6 +114,17 @@ class BinanceUsdMFuturesClient:
 
     def account(self) -> Any:
         return self._request("GET", "/fapi/v2/account", signed=True)
+
+    def position_mode(self) -> Any:
+        return self._request("GET", "/fapi/v1/positionSide/dual", signed=True)
+
+    def set_position_mode(self, hedge: bool) -> Any:
+        return self._request(
+            "POST",
+            "/fapi/v1/positionSide/dual",
+            params={"dualSidePosition": "true" if hedge else "false"},
+            signed=True,
+        )
 
     def ticker_price(self, symbol: str) -> float:
         payload = self._request("GET", "/fapi/v1/ticker/price", params={"symbol": symbol.upper()})
@@ -187,6 +199,22 @@ class BinanceUsdMFuturesClient:
             signed=True,
         )
 
+    def cancel_order(self, symbol: str, order_id: Any) -> Any:
+        return self._request(
+            "DELETE",
+            "/fapi/v1/order",
+            params={"symbol": symbol.upper(), "orderId": order_id},
+            signed=True,
+        )
+
+    def cancel_algo_order(self, symbol: str, algo_id: Any) -> Any:
+        return self._request(
+            "DELETE",
+            "/fapi/v1/algoOrder",
+            params={"symbol": symbol.upper(), "algoId": algo_id},
+            signed=True,
+        )
+
     def set_leverage(self, symbol: str, leverage: int) -> Any:
         return self._request(
             "POST",
@@ -246,50 +274,70 @@ class BinanceUsdMFuturesClient:
     def close_position_market(self, intent: OrderIntent) -> Any:
         if self.settings.perps_env == "mainnet":
             raise RuntimeError("Mainnet order placement is intentionally not enabled in the first scaffold")
+        params = {
+            "symbol": intent.symbol,
+            "side": intent.exit_side,
+            "type": "MARKET",
+            "quantity": self._format_quantity(intent.quantity),
+        }
+        if self._is_hedge_mode():
+            params["positionSide"] = intent.hedge_position_side
+        else:
+            params["reduceOnly"] = "true"
         return self._request(
             "POST",
             "/fapi/v1/order",
-            params={
-                "symbol": intent.symbol,
-                "side": intent.exit_side,
-                "type": "MARKET",
-                "quantity": self._format_quantity(intent.quantity),
-                "reduceOnly": "true",
-            },
+            params=params,
             signed=True,
         )
 
     def _entry_order_params(self, intent: OrderIntent) -> dict[str, Any]:
-        return {
+        params = {
             "symbol": intent.symbol,
             "side": intent.entry_side,
             "type": "MARKET",
             "quantity": self._format_quantity(intent.quantity),
         }
+        if self._is_hedge_mode():
+            params["positionSide"] = intent.hedge_position_side
+        return params
 
     def _stop_algo_params(self, intent: OrderIntent) -> dict[str, Any]:
-        return {
+        params = {
             "algoType": "CONDITIONAL",
             "symbol": intent.symbol,
             "side": intent.exit_side,
-            "positionSide": "BOTH",
             "type": "STOP_MARKET",
             "triggerPrice": self._format_price(intent.stop_loss),
-            "closePosition": "true",
             "workingType": "MARK_PRICE",
         }
+        if self._is_hedge_mode():
+            params["positionSide"] = intent.hedge_position_side
+            params["quantity"] = self._format_quantity(intent.quantity)
+        else:
+            params["positionSide"] = "BOTH"
+            params["closePosition"] = "true"
+        return params
 
     def _take_profit_algo_params(self, intent: OrderIntent) -> dict[str, Any]:
-        return {
+        params = {
             "algoType": "CONDITIONAL",
             "symbol": intent.symbol,
             "side": intent.exit_side,
-            "positionSide": "BOTH",
             "type": "TAKE_PROFIT_MARKET",
             "triggerPrice": self._format_price(intent.take_profit),
-            "closePosition": "true",
             "workingType": "MARK_PRICE",
         }
+        if self._is_hedge_mode():
+            params["positionSide"] = intent.hedge_position_side
+            params["quantity"] = self._format_quantity(intent.quantity)
+        else:
+            params["positionSide"] = "BOTH"
+            params["closePosition"] = "true"
+        return params
+
+    def _is_hedge_mode(self) -> bool:
+        return self.settings.position_mode == "hedge"
 
     @staticmethod
     def _format_quantity(value: float) -> str:

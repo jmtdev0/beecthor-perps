@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from .config import Settings
 from .models import Direction, MarketSnapshot, OrderIntent
@@ -55,3 +56,43 @@ def validate_order_intent(
             raise SafetyViolation("Short intent requires take-profit < entry < stop")
     else:
         raise SafetyViolation(f"Unsupported direction: {intent.direction}")
+
+
+def active_trade_direction(trade: dict[str, Any]) -> str:
+    direction = str(trade.get("direction") or trade.get("position_side") or "").strip().lower()
+    if direction in {"long", "short"}:
+        return direction
+    return ""
+
+
+def active_trade_notional(trade: dict[str, Any]) -> float:
+    value = trade.get("notional_usdc", trade.get("notional_usdt", 0))
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def validate_active_trade_limits(
+    intent: OrderIntent,
+    settings: Settings,
+    active_trades: list[dict[str, Any]],
+) -> None:
+    open_trades = [
+        trade
+        for trade in active_trades
+        if str(trade.get("status") or "open").lower() in {"open", "in_position", "active"}
+    ]
+    if len(open_trades) >= settings.safety.max_open_positions:
+        raise SafetyViolation("Max open positions reached")
+
+    direction = intent.direction.value
+    same_side = [trade for trade in open_trades if active_trade_direction(trade) == direction]
+    if len(same_side) >= settings.safety.max_open_positions_per_side:
+        raise SafetyViolation("Max open positions per side reached")
+
+    total_notional = sum(active_trade_notional(trade) for trade in open_trades) + intent.notional_usdt
+    if total_notional > settings.safety.max_total_notional_usdt:
+        raise SafetyViolation(
+            f"Total notional {total_notional:.2f} exceeds max {settings.safety.max_total_notional_usdt:.2f}"
+        )

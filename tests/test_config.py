@@ -11,6 +11,10 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(settings.is_real_money)
         self.assertEqual(settings.safety.symbol_allowlist, {"BTCUSDC"})
         self.assertEqual(settings.safety.max_leverage, 5)
+        self.assertEqual(settings.position_mode, "one_way")
+        self.assertEqual(settings.safety.max_open_positions, 3)
+        self.assertEqual(settings.safety.max_open_positions_per_side, 2)
+        self.assertEqual(settings.safety.max_total_notional_usdt, 300)
         self.assertEqual(settings.strategy.profile, "conservative")
         self.assertEqual(settings.strategy.min_reward_risk, 1.5)
         self.assertEqual(settings.strategy.target_selection, "first")
@@ -51,12 +55,30 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.safety.max_notional_usdt, 150)
         self.assertEqual(settings.safety.daily_loss_limit_usdt, 25)
 
+    def test_multi_position_settings_are_supported(self):
+        settings = Settings.from_env(
+            env={
+                "POSITION_MODE": "hedge",
+                "MAX_OPEN_POSITIONS": "5",
+                "MAX_OPEN_POSITIONS_PER_SIDE": "3",
+                "MAX_TOTAL_NOTIONAL_USDC": "500",
+            }
+        )
+        self.assertEqual(settings.position_mode, "hedge")
+        self.assertEqual(settings.safety.max_open_positions, 5)
+        self.assertEqual(settings.safety.max_open_positions_per_side, 3)
+        self.assertEqual(settings.safety.max_total_notional_usdt, 500)
+
     def test_rejects_invalid_strategy_settings(self):
         invalid_envs = [
             {"STRATEGY_PROFILE": "turbo"},
             {"MIN_REWARD_RISK": "0"},
             {"TARGET_SELECTION": "last"},
             {"CONFIRMATION_POLICY": "tick"},
+            {"POSITION_MODE": "crossed"},
+            {"MAX_OPEN_POSITIONS": "0"},
+            {"MAX_OPEN_POSITIONS_PER_SIDE": "4", "MAX_OPEN_POSITIONS": "3"},
+            {"MAX_TOTAL_NOTIONAL_USDC": "50", "DEFAULT_NOTIONAL_USDC": "100"},
         ]
         for env in invalid_envs:
             with self.subTest(env=env):

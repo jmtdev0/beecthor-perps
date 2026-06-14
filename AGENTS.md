@@ -14,7 +14,7 @@ The system must prefer shadow decisions and testnet execution before any real-mo
 4. Do not add wallet, withdrawal, transfer, earn, spot, or margin trading capabilities unless explicitly requested and reviewed.
 5. All entry trades must pass safety validation: symbol allowlist, notional cap, leverage cap, stop loss, take profit, and stale-data checks.
 6. Mainnet must require a dedicated subaccount, IP-restricted API keys, isolated futures, and hard-coded local limits.
-7. Closing/risk-reducing orders should use reduce-only or close-position semantics whenever the exchange supports them.
+7. Closing/risk-reducing orders should use reduce-only or close-position semantics whenever the exchange supports them; in Binance Hedge Mode, use explicit `positionSide` plus quantity because `reduceOnly` is not allowed.
 8. Preserve logs and decision ledgers; they are required for audit, tax, and post-trade analysis.
 
 ## Operating Principles

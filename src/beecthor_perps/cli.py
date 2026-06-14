@@ -11,16 +11,18 @@ from .brokers.binance_usdm import BinanceUsdMFuturesClient
 from .brokers.paper import PaperBroker
 from .config import TESTNET_BASE_URL, Settings, load_env_file
 from .engine import PerpsEngine
-from .ledger import ActiveTradeStore, JsonlLedger, utc_now_iso
+from .ledger import ActiveTradesStore, JsonlLedger, utc_now_iso
 from .models import BeecthorThesis, Direction, MarketSnapshot, OrderIntent
 from .notifications import NotificationLedger, TelegramNotifier, format_open_position_message
-from .safety import validate_order_intent
+from .safety import validate_active_trade_limits, validate_order_intent
 from .strategy import evaluate_thesis
 from .thesis import load_thesis_file
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ENV_FILE = REPO_ROOT / ".env"
+ACTIVE_TRADES_FILE = REPO_ROOT / "data" / "active_trades.json"
+LEGACY_ACTIVE_TRADE_FILE = REPO_ROOT / "data" / "active_trade.json"
 
 
 def _settings(args: argparse.Namespace) -> Settings:
@@ -57,6 +59,10 @@ def build_broker(settings: Settings):
 
 def build_notifier(settings: Settings) -> TelegramNotifier:
     return TelegramNotifier(settings, NotificationLedger(REPO_ROOT / "logs" / "notification_ledger.jsonl"))
+
+
+def build_active_trades_store() -> ActiveTradesStore:
+    return ActiveTradesStore(ACTIVE_TRADES_FILE, LEGACY_ACTIVE_TRADE_FILE)
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -184,6 +190,47 @@ def _position_amount(account: dict[str, Any], symbol: str) -> float:
     return 0.0
 
 
+def _exchange_hedge_enabled(client: BinanceUsdMFuturesClient) -> bool:
+    return bool(client.position_mode().get("dualSidePosition"))
+
+
+def _nonzero_positions(account: dict[str, Any], symbols: list[str]) -> list[dict[str, Any]]:
+    wanted = {symbol.upper() for symbol in symbols}
+    result = []
+    for position in account.get("positions", []) or []:
+        symbol = str(position.get("symbol") or "").upper()
+        if wanted and symbol not in wanted:
+            continue
+        amount = float(position.get("positionAmt") or 0)
+        if amount == 0:
+            continue
+        result.append(
+            {
+                "symbol": symbol,
+                "positionSide": position.get("positionSide", "BOTH"),
+                "positionAmt": amount,
+                "entryPrice": position.get("entryPrice"),
+                "breakEvenPrice": position.get("breakEvenPrice"),
+                "leverage": position.get("leverage"),
+            }
+        )
+    return result
+
+
+def _one_way_interference_reason(direction: Direction, symbol: str, position_amt: float) -> str:
+    if direction == Direction.LONG and position_amt < 0:
+        return (
+            f"Refusing manual long: Binance is in One-way Mode and {symbol} has an existing short "
+            f"amount {position_amt}. A BUY would reduce or close that short."
+        )
+    if direction == Direction.SHORT and position_amt > 0:
+        return (
+            f"Refusing manual short: Binance is in One-way Mode and {symbol} has an existing long "
+            f"amount {position_amt}. A SELL would reduce or close that long."
+        )
+    return ""
+
+
 def _symbol_filters(exchange_info: dict[str, Any], symbol: str) -> dict[str, dict[str, str]]:
     symbol_info = _symbol_info(exchange_info, symbol)
     return {item.get("filterType", ""): item for item in symbol_info.get("filters", [])}
@@ -224,7 +271,12 @@ def _quantity_from_quote_notional(
     return float(quantity)
 
 
-def _manual_active_payload(intent: OrderIntent, result: dict[str, Any], label: str) -> dict[str, Any]:
+def _manual_active_payload(
+    intent: OrderIntent,
+    result: dict[str, Any],
+    label: str,
+    position_mode: str,
+) -> dict[str, Any]:
     entry = result.get("entry") or {}
     stop = result.get("stop") or {}
     take_profit = result.get("take_profit") or {}
@@ -232,9 +284,12 @@ def _manual_active_payload(intent: OrderIntent, result: dict[str, Any], label: s
     return {
         "trade_id": f"{label}:{intent.symbol}:{intent.direction.value}:{entry_order_id}",
         "opened_at": utc_now_iso(),
+        "status": "open",
         "symbol": intent.symbol,
         "direction": intent.direction.value,
+        "position_side": intent.hedge_position_side if position_mode == "hedge" else "BOTH",
         "quantity": intent.quantity,
+        "notional_usdc": intent.notional_usdt,
         "notional_usdt": intent.notional_usdt,
         "leverage": intent.leverage,
         "source_video_id": label,
@@ -261,6 +316,7 @@ def _intent_payload(intent: OrderIntent) -> dict[str, Any]:
         "take_profit": intent.take_profit,
         "entry_side": intent.entry_side,
         "exit_side": intent.exit_side,
+        "position_side": intent.hedge_position_side,
         "reason": intent.reason,
         "source_video_id": intent.source_video_id,
     }
@@ -284,25 +340,37 @@ def cmd_open_manual(args: argparse.Namespace) -> int:
         raise SystemExit("open-manual requires BROKER=binance and PERPS_ENV=testnet")
     client = BinanceUsdMFuturesClient(settings)
     notifier = build_notifier(settings)
-    active_store = ActiveTradeStore(REPO_ROOT / "data" / "active_trade.json")
+    active_store = build_active_trades_store()
     decision_ledger = JsonlLedger(REPO_ROOT / "logs" / "decision_ledger.jsonl")
-    if active_store.load():
-        raise SystemExit("Refusing manual order: data/active_trade.json already exists")
+    active_trades = active_store.load_all()
 
     symbol = args.symbol.upper()
+    exchange_hedge_enabled = _exchange_hedge_enabled(client)
+    if settings.position_mode == "hedge" and not exchange_hedge_enabled:
+        raise SystemExit(
+            "Refusing manual order: POSITION_MODE=hedge but Binance is still in One-way Mode. "
+            "Run position-mode set-hedge only after all positions and orders are closed."
+        )
+    if settings.position_mode == "one_way" and exchange_hedge_enabled:
+        raise SystemExit("Refusing manual order: POSITION_MODE=one_way but Binance is in Hedge Mode.")
+
     account = client.account()
     position_amt = _position_amount(account, symbol)
-    if abs(position_amt) > 0:
-        raise SystemExit(f"Refusing manual order: existing {symbol} position amount is {position_amt}")
-    open_orders = client.open_orders(symbol)
-    if open_orders:
-        raise SystemExit(f"Refusing manual order: {symbol} has {len(open_orders)} open orders")
-    open_algo_orders = client.open_algo_orders(symbol)
-    if open_algo_orders:
-        raise SystemExit(f"Refusing manual order: {symbol} has {len(open_algo_orders)} open algo orders")
+    direction = Direction(args.direction)
+    if settings.position_mode == "one_way":
+        interference = _one_way_interference_reason(direction, symbol, position_amt)
+        if interference:
+            raise SystemExit(interference)
+        if abs(position_amt) > 0:
+            raise SystemExit(f"Refusing manual order: existing One-way {symbol} position amount is {position_amt}")
+        open_orders = client.open_orders(symbol)
+        if open_orders:
+            raise SystemExit(f"Refusing manual order: {symbol} has {len(open_orders)} open orders")
+        open_algo_orders = client.open_algo_orders(symbol)
+        if open_algo_orders:
+            raise SystemExit(f"Refusing manual order: {symbol} has {len(open_algo_orders)} open algo orders")
 
     price = client.ticker_price(symbol)
-    direction = Direction(args.direction)
     quantity = args.quantity
     if quantity is None:
         quantity = _quantity_from_quote_notional(
@@ -325,6 +393,7 @@ def cmd_open_manual(args: argparse.Namespace) -> int:
         source_video_id=args.label,
     )
     validate_order_intent(intent, settings)
+    validate_active_trade_limits(intent, settings, active_trades)
     payload = {
         "label": args.label,
         "dry_run": args.dry_run,
@@ -338,8 +407,8 @@ def cmd_open_manual(args: argparse.Namespace) -> int:
         return 0
 
     result = client.place_order_intent(intent)
-    active_payload = _manual_active_payload(intent, result, args.label)
-    active_store.save(active_payload)
+    active_payload = _manual_active_payload(intent, result, args.label, settings.position_mode)
+    active_store.add(active_payload)
     event_id = f"position_opened:{active_payload['trade_id']}"
     notification = notifier.send_once(event_id, format_open_position_message(intent, settings, args.label))
     decision_ledger.append(
@@ -356,6 +425,82 @@ def cmd_open_manual(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_position_mode_status(args: argparse.Namespace) -> int:
+    settings = _settings(args)
+    if settings.broker != "binance" or settings.perps_env != "testnet":
+        raise SystemExit("position-mode status requires BROKER=binance and PERPS_ENV=testnet")
+    client = BinanceUsdMFuturesClient(settings)
+    symbols = [symbol.upper() for symbol in (args.symbols or sorted(settings.safety.symbol_allowlist))]
+    account = client.account()
+    mode = client.position_mode()
+    positions = _nonzero_positions(account, symbols)
+    open_order_counts = {
+        symbol: {
+            "orders": len(client.open_orders(symbol)),
+            "algo_orders": len(client.open_algo_orders(symbol)),
+        }
+        for symbol in symbols
+    }
+    _print_json(
+        {
+            "configured_position_mode": settings.position_mode,
+            "exchange_dual_side_position": bool(mode.get("dualSidePosition")),
+            "symbols": symbols,
+            "positions": positions,
+            "open_order_counts": open_order_counts,
+        }
+    )
+    return 0
+
+
+def cmd_position_mode_set_hedge(args: argparse.Namespace) -> int:
+    settings = _settings(args)
+    if settings.broker != "binance" or settings.perps_env != "testnet":
+        raise SystemExit("position-mode set-hedge requires BROKER=binance and PERPS_ENV=testnet")
+    client = BinanceUsdMFuturesClient(settings)
+    symbols = sorted(settings.safety.symbol_allowlist)
+    account = client.account()
+    positions = _nonzero_positions(account, symbols)
+    open_order_counts = {
+        symbol: len(client.open_orders(symbol)) + len(client.open_algo_orders(symbol))
+        for symbol in symbols
+    }
+    active_order_symbols = {symbol: count for symbol, count in open_order_counts.items() if count > 0}
+    if positions or active_order_symbols:
+        raise SystemExit(
+            "Refusing to enable Hedge Mode: Binance requires all positions and open orders to be closed first. "
+            f"positions={positions}; open_orders={active_order_symbols}"
+        )
+    result = client.set_position_mode(True)
+    _print_json({"ok": True, "result": result, "exchange_position_mode": client.position_mode()})
+    return 0
+
+
+def cmd_list_active_trades(args: argparse.Namespace) -> int:
+    _print_json({"trades": build_active_trades_store().load_all()})
+    return 0
+
+
+def cmd_reconcile_trades(args: argparse.Namespace) -> int:
+    settings = _settings(args)
+    store = build_active_trades_store()
+    active_trades = store.load_all()
+    if not active_trades:
+        _print_json({"state": "wait", "reason": "No active trades"})
+        return 0
+    engine = PerpsEngine(
+        settings=settings,
+        broker=build_broker(settings),
+        notifier=build_notifier(settings),
+        thesis_file=Path(settings.beecthor_thesis_file or "data/perps_theses/latest.json"),
+        decision_ledger=JsonlLedger(REPO_ROOT / "logs" / "decision_ledger.jsonl"),
+        active_trade_store=store,
+        symbol=args.symbol,
+    )
+    _print_json(engine.reconcile_active_trades(active_trades))
+    return 0
+
+
 def cmd_run_engine(args: argparse.Namespace) -> int:
     settings = _settings(args)
     thesis_arg = args.thesis or settings.beecthor_thesis_file
@@ -368,7 +513,7 @@ def cmd_run_engine(args: argparse.Namespace) -> int:
         notifier=build_notifier(settings),
         thesis_file=thesis_file,
         decision_ledger=JsonlLedger(REPO_ROOT / "logs" / "decision_ledger.jsonl"),
-        active_trade_store=ActiveTradeStore(REPO_ROOT / "data" / "active_trade.json"),
+        active_trade_store=build_active_trades_store(),
         symbol=args.symbol,
     )
     if args.once:
@@ -423,6 +568,21 @@ def build_parser() -> argparse.ArgumentParser:
     open_manual.add_argument("--label", default="jmt-order", help="Trace label/source for logs and notifications")
     open_manual.add_argument("--dry-run", action="store_true", help="Validate and print intent without placing orders")
     open_manual.set_defaults(func=cmd_open_manual)
+
+    position_mode = subparsers.add_parser("position-mode", help="Inspect or change Binance position mode")
+    position_mode_sub = position_mode.add_subparsers(dest="position_mode_command", required=True)
+    position_status = position_mode_sub.add_parser("status", help="Show Binance Demo position mode and open exposure")
+    position_status.add_argument("--symbols", nargs="*", help="Symbols to inspect. Defaults to SYMBOL_ALLOWLIST.")
+    position_status.set_defaults(func=cmd_position_mode_status)
+    position_set_hedge = position_mode_sub.add_parser("set-hedge", help="Enable Hedge Mode only when account is flat")
+    position_set_hedge.set_defaults(func=cmd_position_mode_set_hedge)
+
+    list_trades = subparsers.add_parser("list-active-trades", help="List locally tracked active trades")
+    list_trades.set_defaults(func=cmd_list_active_trades)
+
+    reconcile = subparsers.add_parser("reconcile-trades", help="Reconcile tracked active trades with Binance")
+    reconcile.add_argument("--symbol", default="BTCUSDC", help="Default symbol for legacy active trades")
+    reconcile.set_defaults(func=cmd_reconcile_trades)
 
     run_engine = subparsers.add_parser("run-engine", help="Run the V1 thesis monitor/executor")
     run_engine.add_argument("--thesis", default="", help="Path to latest perps thesis JSON")

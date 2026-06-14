@@ -9,6 +9,7 @@ The repo is intentionally conservative:
 - `mainnet` is blocked unless a dedicated subaccount and real-money acknowledgement are configured.
 - Strategy output is an order intent, not an order, until it passes deterministic safety checks.
 - BTCUSDC order size starts at the practical minimum that satisfies Binance Demo filters; at recent BTC prices this is usually `0.002 BTC`.
+- Multi-position support is explicit: `POSITION_MODE=hedge` requires Binance Hedge Mode to already be enabled and flat before switching.
 
 ## Quick Start
 
@@ -19,6 +20,8 @@ python -m unittest
 python -m beecthor_perps status
 python -m beecthor_perps evaluate --thesis examples\beecthor_thesis.sample.json --price 78100
 python -m beecthor_perps check-telegram
+python -m beecthor_perps position-mode status
+python -m beecthor_perps list-active-trades
 python -m beecthor_perps run-engine --once
 ```
 
@@ -60,8 +63,17 @@ The bot must refuse to trade when any of these are true:
 - stop loss or take profit is missing
 - stop/take-profit direction is invalid
 - there is already an open position beyond `MAX_OPEN_POSITIONS`
+- one side already has `MAX_OPEN_POSITIONS_PER_SIDE`
+- aggregate tracked notional would exceed `MAX_TOTAL_NOTIONAL_USDC`
+- a long in One-way Mode would reduce an existing short, or a short would reduce an existing long
 - daily realized loss is beyond `DAILY_LOSS_LIMIT_USDC`
 - mainnet is selected without the subaccount guard and acknowledgement
+
+## Hedge Mode Notes
+
+`POSITION_MODE=hedge` makes Binance orders include `positionSide=LONG` or `positionSide=SHORT`.
+Protective orders are per-trade quantity orders, not `closePosition=true`, so one TP/SL does not close the whole side.
+Binance will not enable Hedge Mode while positions or open orders exist; use `position-mode set-hedge` only when the Demo account is flat.
 
 ## Playbook
 

@@ -69,6 +69,8 @@ class SafetyLimits:
     max_leverage: int
     daily_loss_limit_usdt: float
     max_open_positions: int
+    max_open_positions_per_side: int
+    max_total_notional_usdt: float
     market_data_max_age_seconds: int
 
 
@@ -92,6 +94,7 @@ class StrategySettings:
 class Settings:
     perps_env: str
     broker: str
+    position_mode: str
     beecthor_thesis_file: str
     binance_base_url: str
     binance_api_key: str
@@ -135,13 +138,16 @@ class Settings:
         default_notional = _first_present(merged, "DEFAULT_NOTIONAL_USDC", "DEFAULT_NOTIONAL_USDT")
         max_notional = _first_present(merged, "MAX_NOTIONAL_USDC", "MAX_NOTIONAL_USDT")
         daily_loss_limit = _first_present(merged, "DAILY_LOSS_LIMIT_USDC", "DAILY_LOSS_LIMIT_USDT")
+        max_total_notional = _first_present(merged, "MAX_TOTAL_NOTIONAL_USDC", "MAX_TOTAL_NOTIONAL_USDT")
         safety = SafetyLimits(
             symbol_allowlist=_csv(merged.get("SYMBOL_ALLOWLIST"), {"BTCUSDC"}),
             default_notional_usdt=_float(default_notional, 100.0),
             max_notional_usdt=_float(max_notional, 150.0),
             max_leverage=_int(merged.get("MAX_LEVERAGE"), 5),
             daily_loss_limit_usdt=_float(daily_loss_limit, 25.0),
-            max_open_positions=_int(merged.get("MAX_OPEN_POSITIONS"), 1),
+            max_open_positions=_int(merged.get("MAX_OPEN_POSITIONS"), 3),
+            max_open_positions_per_side=_int(merged.get("MAX_OPEN_POSITIONS_PER_SIDE"), 2),
+            max_total_notional_usdt=_float(max_total_notional, 300.0),
             market_data_max_age_seconds=_int(merged.get("MARKET_DATA_MAX_AGE_SECONDS"), 20),
         )
         strategy = StrategySettings(
@@ -166,6 +172,7 @@ class Settings:
         settings = cls(
             perps_env=perps_env,
             broker=merged.get("BROKER", "paper").strip().lower(),
+            position_mode=merged.get("POSITION_MODE", "one_way").strip().lower(),
             beecthor_thesis_file=merged.get("BEECTHOR_THESIS_FILE", "").strip(),
             binance_base_url=merged.get("BINANCE_BASE_URL", default_base_url).strip().rstrip("/"),
             binance_api_key=_first_present(
@@ -203,6 +210,8 @@ class Settings:
             raise ConfigurationError("PERPS_ENV must be one of: shadow, testnet, mainnet")
         if self.broker not in {"paper", "binance"}:
             raise ConfigurationError("BROKER must be one of: paper, binance")
+        if self.position_mode not in {"one_way", "hedge"}:
+            raise ConfigurationError("POSITION_MODE must be one of: one_way, hedge")
         if not self.safety.symbol_allowlist:
             raise ConfigurationError("SYMBOL_ALLOWLIST cannot be empty")
         if self.safety.default_notional_usdt <= 0:
@@ -213,6 +222,16 @@ class Settings:
             raise ConfigurationError("DEFAULT_NOTIONAL_USDC/USDT cannot exceed MAX_NOTIONAL_USDC/USDT")
         if self.safety.max_leverage < 1:
             raise ConfigurationError("MAX_LEVERAGE must be >= 1")
+        if self.safety.max_open_positions < 1:
+            raise ConfigurationError("MAX_OPEN_POSITIONS must be >= 1")
+        if self.safety.max_open_positions_per_side < 1:
+            raise ConfigurationError("MAX_OPEN_POSITIONS_PER_SIDE must be >= 1")
+        if self.safety.max_open_positions_per_side > self.safety.max_open_positions:
+            raise ConfigurationError("MAX_OPEN_POSITIONS_PER_SIDE cannot exceed MAX_OPEN_POSITIONS")
+        if self.safety.max_total_notional_usdt <= 0:
+            raise ConfigurationError("MAX_TOTAL_NOTIONAL_USDC/USDT must be positive")
+        if self.safety.max_total_notional_usdt < self.safety.default_notional_usdt:
+            raise ConfigurationError("MAX_TOTAL_NOTIONAL_USDC/USDT cannot be below DEFAULT_NOTIONAL_USDC/USDT")
         if self.strategy.profile not in {"conservative", "demo_learning"}:
             raise ConfigurationError("STRATEGY_PROFILE must be one of: conservative, demo_learning")
         if self.strategy.min_reward_risk <= 0:
@@ -245,6 +264,7 @@ class Settings:
         return {
             "perps_env": self.perps_env,
             "broker": self.broker,
+            "position_mode": self.position_mode,
             "beecthor_thesis_file": self.beecthor_thesis_file,
             "binance_base_url": self.binance_base_url,
             "has_binance_api_key": bool(self.binance_api_key),
@@ -262,6 +282,8 @@ class Settings:
                 "max_leverage": self.safety.max_leverage,
                 "daily_loss_limit_usdt": self.safety.daily_loss_limit_usdt,
                 "max_open_positions": self.safety.max_open_positions,
+                "max_open_positions_per_side": self.safety.max_open_positions_per_side,
+                "max_total_notional_usdt": self.safety.max_total_notional_usdt,
                 "market_data_max_age_seconds": self.safety.market_data_max_age_seconds,
             },
             "strategy": self.strategy.sanitized(),

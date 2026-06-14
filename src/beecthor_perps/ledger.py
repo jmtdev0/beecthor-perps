@@ -41,3 +41,46 @@ class ActiveTradeStore:
     def clear(self) -> None:
         if self.path.exists():
             self.path.unlink()
+
+
+class ActiveTradesStore:
+    def __init__(self, path: Path, legacy_path: Path | None = None) -> None:
+        self.path = path
+        self.legacy_path = legacy_path
+
+    def load_all(self) -> list[dict[str, Any]]:
+        if self.path.exists():
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+            if isinstance(payload, list):
+                return [trade for trade in payload if isinstance(trade, dict)]
+            if isinstance(payload, dict):
+                trades = payload.get("trades", [])
+                if isinstance(trades, list):
+                    return [trade for trade in trades if isinstance(trade, dict)]
+            return []
+        if self.legacy_path and self.legacy_path.exists():
+            legacy = json.loads(self.legacy_path.read_text(encoding="utf-8"))
+            if isinstance(legacy, dict):
+                migrated = dict(legacy)
+                migrated.setdefault("status", "open")
+                migrated.setdefault("position_side", str(migrated.get("direction") or "").upper() or "BOTH")
+                return [migrated]
+        return []
+
+    def save_all(self, trades: list[dict[str, Any]]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"trades": trades}
+        self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+        if self.legacy_path and self.legacy_path.exists():
+            self.legacy_path.unlink()
+
+    def add(self, payload: dict[str, Any]) -> None:
+        trades = self.load_all()
+        trades.append(payload)
+        self.save_all(trades)
+
+    def clear(self) -> None:
+        if self.path.exists():
+            self.path.unlink()
+        if self.legacy_path and self.legacy_path.exists():
+            self.legacy_path.unlink()
