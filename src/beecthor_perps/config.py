@@ -139,14 +139,18 @@ class Settings:
         max_notional = _first_present(merged, "MAX_NOTIONAL_USDC", "MAX_NOTIONAL_USDT")
         daily_loss_limit = _first_present(merged, "DAILY_LOSS_LIMIT_USDC", "DAILY_LOSS_LIMIT_USDT")
         max_total_notional = _first_present(merged, "MAX_TOTAL_NOTIONAL_USDC", "MAX_TOTAL_NOTIONAL_USDT")
+        max_open_positions = _int(merged.get("MAX_OPEN_POSITIONS"), 3)
         safety = SafetyLimits(
             symbol_allowlist=_csv(merged.get("SYMBOL_ALLOWLIST"), {"BTCUSDC"}),
             default_notional_usdt=_float(default_notional, 100.0),
             max_notional_usdt=_float(max_notional, 150.0),
             max_leverage=_int(merged.get("MAX_LEVERAGE"), 5),
             daily_loss_limit_usdt=_float(daily_loss_limit, 25.0),
-            max_open_positions=_int(merged.get("MAX_OPEN_POSITIONS"), 3),
-            max_open_positions_per_side=_int(merged.get("MAX_OPEN_POSITIONS_PER_SIDE"), 2),
+            max_open_positions=max_open_positions,
+            max_open_positions_per_side=_int(
+                merged.get("MAX_OPEN_POSITIONS_PER_SIDE"),
+                min(2, max_open_positions),
+            ),
             max_total_notional_usdt=_float(max_total_notional, 300.0),
             market_data_max_age_seconds=_int(merged.get("MARKET_DATA_MAX_AGE_SECONDS"), 20),
         )

@@ -69,6 +69,11 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.safety.max_open_positions_per_side, 3)
         self.assertEqual(settings.safety.max_total_notional_usdt, 500)
 
+    def test_legacy_max_open_positions_one_keeps_safe_per_side_default(self):
+        settings = Settings.from_env(env={"MAX_OPEN_POSITIONS": "1"})
+        self.assertEqual(settings.safety.max_open_positions, 1)
+        self.assertEqual(settings.safety.max_open_positions_per_side, 1)
+
     def test_rejects_invalid_strategy_settings(self):
         invalid_envs = [
             {"STRATEGY_PROFILE": "turbo"},
