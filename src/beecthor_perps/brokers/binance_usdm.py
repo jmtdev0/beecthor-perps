@@ -230,8 +230,8 @@ class BinanceUsdMFuturesClient:
         validate_order_intent(intent, self.settings)
         return self._request("POST", "/fapi/v1/order/test", params=self._entry_order_params(intent), signed=True)
 
-    def place_order_intent(self, intent: OrderIntent) -> dict[str, Any]:
-        validate_order_intent(intent, self.settings)
+    def place_order_intent(self, intent: OrderIntent, *, require_stop_loss: bool = True) -> dict[str, Any]:
+        validate_order_intent(intent, self.settings, require_stop_loss=require_stop_loss)
         if self.settings.perps_env == "mainnet":
             raise RuntimeError("Mainnet order placement is intentionally not enabled in the first scaffold")
 
@@ -240,7 +240,13 @@ class BinanceUsdMFuturesClient:
         stop = None
         take_profit = None
         try:
-            stop = self._request("POST", "/fapi/v1/algoOrder", params=self._stop_algo_params(intent), signed=True)
+            if require_stop_loss:
+                stop = self._request(
+                    "POST",
+                    "/fapi/v1/algoOrder",
+                    params=self._stop_algo_params(intent),
+                    signed=True,
+                )
             take_profit = self._request(
                 "POST",
                 "/fapi/v1/algoOrder",
@@ -262,7 +268,7 @@ class BinanceUsdMFuturesClient:
             except Exception as cancel_exc:
                 cancel_result = {"ok": False, "error": f"{type(cancel_exc).__name__}: {cancel_exc}"}
             raise ProtectiveOrderFailure(
-                "Entry order was created but protective orders were not fully placed",
+                "Entry order was created but required exit orders were not fully placed",
                 entry=entry,
                 stop=stop,
                 take_profit=take_profit,

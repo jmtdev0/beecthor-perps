@@ -77,6 +77,8 @@ Binance will not enable Hedge Mode while positions or open orders exist; use `po
 
 BTCUSDC and BTCUSDT are independent symbols, so one One-way position in each symbol can coexist. This is not Hedge Mode: entries within the same symbol still merge into that symbol's single net position. BTCUSDT support here is intended for Demo/testnet; mainnet remains behind the existing subaccount and real-money guards.
 
+Manual Demo orders normally require both stop-loss and take-profit. `open-manual --no-stop-loss` is an explicit Testnet-only exception: it keeps take-profit mandatory, records the omission in the ledger and notification, and does not relax the automatic engine or enable mainnet execution.
+
 ## Playbook
 
 The operational rules live in [PLAYBOOK.md](PLAYBOOK.md). Update that document before enabling new setups or changing the active market regime.

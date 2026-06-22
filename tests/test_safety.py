@@ -54,6 +54,39 @@ class SafetyTests(unittest.TestCase):
         with self.assertRaises(SafetyViolation):
             validate_order_intent(intent, self.settings)
 
+    def test_manual_demo_override_accepts_long_without_stop(self):
+        intent = OrderIntent(
+            symbol="BTCUSDT",
+            direction=Direction.LONG,
+            quantity=0.002,
+            notional_usdt=130,
+            leverage=5,
+            entry_price_reference=65000,
+            stop_loss=0,
+            take_profit=66000,
+            reason="manual Demo test",
+        )
+
+        validate_order_intent(intent, self.settings, require_stop_loss=False)
+        with self.assertRaises(SafetyViolation):
+            validate_order_intent(intent, self.settings)
+
+    def test_manual_demo_override_still_rejects_invalid_take_profit(self):
+        intent = OrderIntent(
+            symbol="BTCUSDT",
+            direction=Direction.LONG,
+            quantity=0.002,
+            notional_usdt=130,
+            leverage=5,
+            entry_price_reference=65000,
+            stop_loss=0,
+            take_profit=64000,
+            reason="manual Demo test",
+        )
+
+        with self.assertRaises(SafetyViolation):
+            validate_order_intent(intent, self.settings, require_stop_loss=False)
+
     def test_rejects_total_open_position_limit(self):
         intent = OrderIntent(
             symbol="BTCUSDC",

@@ -27,6 +27,7 @@ def validate_order_intent(
     *,
     open_positions: int = 0,
     realized_pnl_today_usdt: float = 0.0,
+    require_stop_loss: bool = True,
 ) -> None:
     symbol = intent.symbol.upper()
     if symbol not in settings.safety.symbol_allowlist:
@@ -45,14 +46,20 @@ def validate_order_intent(
         raise SafetyViolation("Max open positions reached")
     if realized_pnl_today_usdt <= -abs(settings.safety.daily_loss_limit_usdt):
         raise SafetyViolation("Daily loss limit reached")
-    if intent.stop_loss <= 0 or intent.take_profit <= 0:
-        raise SafetyViolation("Stop loss and take profit are required")
+    if intent.take_profit <= 0:
+        raise SafetyViolation("Take profit is required")
+    if require_stop_loss and intent.stop_loss <= 0:
+        raise SafetyViolation("Stop loss is required")
 
     if intent.direction == Direction.LONG:
-        if not intent.stop_loss < intent.entry_price_reference < intent.take_profit:
+        if intent.entry_price_reference >= intent.take_profit:
+            raise SafetyViolation("Long intent requires entry < take-profit")
+        if require_stop_loss and intent.stop_loss >= intent.entry_price_reference:
             raise SafetyViolation("Long intent requires stop < entry < take-profit")
     elif intent.direction == Direction.SHORT:
-        if not intent.take_profit < intent.entry_price_reference < intent.stop_loss:
+        if intent.take_profit >= intent.entry_price_reference:
+            raise SafetyViolation("Short intent requires take-profit < entry")
+        if require_stop_loss and intent.stop_loss <= intent.entry_price_reference:
             raise SafetyViolation("Short intent requires take-profit < entry < stop")
     else:
         raise SafetyViolation(f"Unsupported direction: {intent.direction}")

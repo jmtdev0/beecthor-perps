@@ -298,7 +298,8 @@ def _manual_active_payload(
         "take_profit_order_id": _order_identifier(take_profit),
         "stop_order_kind": _order_kind(stop),
         "take_profit_order_kind": _order_kind(take_profit),
-        "stop_loss": intent.stop_loss,
+        "stop_loss": intent.stop_loss if intent.stop_loss > 0 else None,
+        "stop_loss_omitted": intent.stop_loss <= 0,
         "take_profit": intent.take_profit,
         "label": label,
     }
@@ -312,7 +313,8 @@ def _intent_payload(intent: OrderIntent) -> dict[str, Any]:
         "notional_usdt": intent.notional_usdt,
         "leverage": intent.leverage,
         "entry_price_reference": intent.entry_price_reference,
-        "stop_loss": intent.stop_loss,
+        "stop_loss": intent.stop_loss if intent.stop_loss > 0 else None,
+        "stop_loss_omitted": intent.stop_loss <= 0,
         "take_profit": intent.take_profit,
         "entry_side": intent.entry_side,
         "exit_side": intent.exit_side,
@@ -380,6 +382,7 @@ def cmd_open_manual(args: argparse.Namespace) -> int:
             price=price,
         )
     notional = round(quantity * price, 2)
+    require_stop_loss = not args.no_stop_loss
     intent = OrderIntent(
         symbol=symbol,
         direction=direction,
@@ -387,12 +390,16 @@ def cmd_open_manual(args: argparse.Namespace) -> int:
         notional_usdt=notional,
         leverage=args.leverage,
         entry_price_reference=price,
-        stop_loss=args.stop_loss,
+        stop_loss=args.stop_loss or 0.0,
         take_profit=args.take_profit,
-        reason=f"Manual user order: {args.label}",
+        reason=(
+            f"Manual user order: {args.label}"
+            if require_stop_loss
+            else f"Manual Demo user order without stop loss: {args.label}"
+        ),
         source_video_id=args.label,
     )
-    validate_order_intent(intent, settings)
+    validate_order_intent(intent, settings, require_stop_loss=require_stop_loss)
     validate_active_trade_limits(intent, settings, active_trades)
     payload = {
         "label": args.label,
@@ -401,12 +408,13 @@ def cmd_open_manual(args: argparse.Namespace) -> int:
         "reference_price": price,
         "requested_notional": args.notional,
         "computed_notional": notional,
+        "stop_loss_required": require_stop_loss,
     }
     if args.dry_run:
         _print_json({"ok": True, **payload})
         return 0
 
-    result = client.place_order_intent(intent)
+    result = client.place_order_intent(intent, require_stop_loss=require_stop_loss)
     active_payload = _manual_active_payload(intent, result, args.label, settings.position_mode)
     active_store.add(active_payload)
     event_id = f"position_opened:{active_payload['trade_id']}"
@@ -557,14 +565,20 @@ def build_parser() -> argparse.ArgumentParser:
     check_telegram = subparsers.add_parser("check-telegram", help="Send a Telegram test notification")
     check_telegram.set_defaults(func=cmd_check_telegram)
 
-    open_manual = subparsers.add_parser("open-manual", help="Open a manual Binance Demo position with SL/TP")
+    open_manual = subparsers.add_parser("open-manual", help="Open a manual Binance Demo position with required TP")
     open_manual.add_argument("--symbol", default="BTCUSDC", help="Futures symbol")
     open_manual.add_argument("--direction", choices=[Direction.LONG.value, Direction.SHORT.value], required=True)
     open_manual.add_argument("--notional", default=100.0, type=float, help="Requested quote notional")
     open_manual.add_argument("--quantity", type=float, help="Explicit BTC quantity. Overrides --notional.")
     open_manual.add_argument("--leverage", default=5, type=int, help="Leverage to set before entry")
     open_manual.add_argument("--take-profit", required=True, type=float, help="Take-profit trigger price")
-    open_manual.add_argument("--stop-loss", required=True, type=float, help="Stop-loss trigger price")
+    stop_policy = open_manual.add_mutually_exclusive_group(required=True)
+    stop_policy.add_argument("--stop-loss", type=float, help="Stop-loss trigger price")
+    stop_policy.add_argument(
+        "--no-stop-loss",
+        action="store_true",
+        help="Explicitly omit the stop-loss for this manual Binance Demo order only",
+    )
     open_manual.add_argument("--label", default="jmt-order", help="Trace label/source for logs and notifications")
     open_manual.add_argument("--dry-run", action="store_true", help="Validate and print intent without placing orders")
     open_manual.set_defaults(func=cmd_open_manual)

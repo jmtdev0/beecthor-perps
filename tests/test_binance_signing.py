@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from beecthor_perps.brokers.binance_usdm import BinanceUsdMFuturesClient
 from beecthor_perps.config import Settings
@@ -62,6 +63,23 @@ class BinanceSigningTests(unittest.TestCase):
         self.assertEqual(stop["positionSide"], "BOTH")
         self.assertEqual(stop["closePosition"], "true")
         self.assertNotIn("quantity", stop)
+
+    def test_manual_demo_order_can_place_take_profit_without_stop(self):
+        client = self._client(POSITION_MODE="one_way")
+        original = self._intent(Direction.LONG)
+        intent = OrderIntent(**{**original.__dict__, "stop_loss": 0})
+
+        with patch.object(client, "set_leverage", return_value={"leverage": 5}), patch.object(
+            client,
+            "_request",
+            side_effect=[{"orderId": 10}, {"algoId": 20}],
+        ) as request:
+            result = client.place_order_intent(intent, require_stop_loss=False)
+
+        self.assertIsNone(result["stop"])
+        self.assertEqual(result["take_profit"]["algoId"], 20)
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(request.call_args_list[1].kwargs["params"]["type"], "TAKE_PROFIT_MARKET")
 
 
 if __name__ == "__main__":

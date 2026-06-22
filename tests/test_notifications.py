@@ -4,7 +4,13 @@ from pathlib import Path
 
 from beecthor_perps.config import Settings
 from beecthor_perps.engine import _active_position_side, _cancel_sibling_protection, _classify_close
-from beecthor_perps.notifications import NotificationLedger, TelegramNotifier, quote_asset
+from beecthor_perps.models import Direction, OrderIntent
+from beecthor_perps.notifications import (
+    NotificationLedger,
+    TelegramNotifier,
+    format_open_position_message,
+    quote_asset,
+)
 
 
 class NotificationTests(unittest.TestCase):
@@ -37,6 +43,24 @@ class NotificationTests(unittest.TestCase):
         self.assertTrue(first["ok"])
         self.assertTrue(second["skipped"])
         self.assertEqual(len(calls), 1)
+
+    def test_manual_demo_notification_marks_omitted_stop(self):
+        settings = Settings.from_env(env={"PERPS_ENV": "testnet"})
+        intent = OrderIntent(
+            symbol="BTCUSDT",
+            direction=Direction.LONG,
+            quantity=0.002,
+            notional_usdt=130,
+            leverage=5,
+            entry_price_reference=65000,
+            stop_loss=0,
+            take_profit=66000,
+            reason="manual Demo test",
+        )
+
+        message = format_open_position_message(intent, settings, "jmt-order")
+
+        self.assertIn("Sin stop (orden manual Demo)", message)
 
     def test_classifies_take_profit_and_stop_loss_closures(self):
         active_trade = {"stop_order_id": 11, "take_profit_order_id": 22}

@@ -92,6 +92,7 @@ class TelegramNotifier:
 
 def format_open_position_message(intent: OrderIntent, settings: Settings, setup: str) -> str:
     quote = quote_asset(intent.symbol)
+    stop_text = f"{intent.stop_loss:.2f}" if intent.stop_loss > 0 else "Sin stop (orden manual Demo)"
     return "\n".join(
         [
             "🟢 <b>Beecthor Perps: posición abierta</b>",
@@ -102,7 +103,7 @@ def format_open_position_message(intent: OrderIntent, settings: Settings, setup:
             f"Notional aprox.: <b>{intent.notional_usdt:.2f} {quote}</b>",
             f"Leverage: <b>{intent.leverage}x</b>",
             f"Entrada ref.: <b>{intent.entry_price_reference:.2f}</b>",
-            f"Stop: <b>{intent.stop_loss:.2f}</b>",
+            f"Stop: <b>{stop_text}</b>",
             f"Take-profit: <b>{intent.take_profit:.2f}</b>",
             f"Setup: <b>{setup}</b>",
             f"Vídeo: <b>{intent.source_video_id or 'unknown'}</b>",

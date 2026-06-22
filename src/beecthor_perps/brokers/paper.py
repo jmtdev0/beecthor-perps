@@ -15,7 +15,7 @@ class PaperBroker:
     def status(self) -> dict[str, Any]:
         return {"broker": "paper", "ledger_path": str(self.ledger_path)}
 
-    def place_order_intent(self, intent: OrderIntent) -> dict[str, Any]:
+    def place_order_intent(self, intent: OrderIntent, *, require_stop_loss: bool = True) -> dict[str, Any]:
         payload = {
             "recorded_at": datetime.now(UTC).isoformat(),
             "mode": "paper",
