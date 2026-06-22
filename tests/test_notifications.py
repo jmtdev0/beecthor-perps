@@ -4,10 +4,14 @@ from pathlib import Path
 
 from beecthor_perps.config import Settings
 from beecthor_perps.engine import _active_position_side, _cancel_sibling_protection, _classify_close
-from beecthor_perps.notifications import NotificationLedger, TelegramNotifier
+from beecthor_perps.notifications import NotificationLedger, TelegramNotifier, quote_asset
 
 
 class NotificationTests(unittest.TestCase):
+    def test_quote_asset_supports_both_btc_demo_pairs(self):
+        self.assertEqual(quote_asset("BTCUSDC"), "USDC")
+        self.assertEqual(quote_asset("BTCUSDT"), "USDT")
+
     def test_send_once_deduplicates_events(self):
         settings = Settings.from_env(
             env={

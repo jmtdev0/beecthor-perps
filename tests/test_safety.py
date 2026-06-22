@@ -24,6 +24,21 @@ class SafetyTests(unittest.TestCase):
         with self.assertRaises(SafetyViolation):
             validate_order_intent(intent, self.settings)
 
+    def test_accepts_btcusdt_in_default_allowlist(self):
+        intent = OrderIntent(
+            symbol="BTCUSDT",
+            direction=Direction.SHORT,
+            quantity=0.002,
+            notional_usdt=130,
+            leverage=2,
+            entry_price_reference=65000,
+            stop_loss=66000,
+            take_profit=63000,
+            reason="test",
+        )
+
+        validate_order_intent(intent, self.settings)
+
     def test_rejects_invalid_short_stop_direction(self):
         intent = OrderIntent(
             symbol="BTCUSDC",

@@ -39,7 +39,7 @@ def _testnet_binance_settings(args: argparse.Namespace) -> Settings:
             "PERPS_ENV": "testnet",
             "BROKER": "binance",
             "BINANCE_BASE_URL": TESTNET_BASE_URL,
-            "SYMBOL_ALLOWLIST": raw.get("SYMBOL_ALLOWLIST", "BTCUSDC"),
+            "SYMBOL_ALLOWLIST": raw.get("SYMBOL_ALLOWLIST", "BTCUSDC,BTCUSDT"),
             "DEFAULT_NOTIONAL_USDC": raw.get("DEFAULT_NOTIONAL_USDC", raw.get("DEFAULT_NOTIONAL_USDT", "100")),
             "MAX_NOTIONAL_USDC": raw.get("MAX_NOTIONAL_USDC", raw.get("MAX_NOTIONAL_USDT", "150")),
             "MAX_LEVERAGE": raw.get("MAX_LEVERAGE", "5"),

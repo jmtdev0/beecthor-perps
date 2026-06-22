@@ -9,7 +9,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.perps_env, "shadow")
         self.assertEqual(settings.broker, "paper")
         self.assertFalse(settings.is_real_money)
-        self.assertEqual(settings.safety.symbol_allowlist, {"BTCUSDC"})
+        self.assertEqual(settings.safety.symbol_allowlist, {"BTCUSDC", "BTCUSDT"})
         self.assertEqual(settings.safety.max_leverage, 5)
         self.assertEqual(settings.position_mode, "one_way")
         self.assertEqual(settings.safety.max_open_positions, 3)

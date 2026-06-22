@@ -141,7 +141,7 @@ class Settings:
         max_total_notional = _first_present(merged, "MAX_TOTAL_NOTIONAL_USDC", "MAX_TOTAL_NOTIONAL_USDT")
         max_open_positions = _int(merged.get("MAX_OPEN_POSITIONS"), 3)
         safety = SafetyLimits(
-            symbol_allowlist=_csv(merged.get("SYMBOL_ALLOWLIST"), {"BTCUSDC"}),
+            symbol_allowlist=_csv(merged.get("SYMBOL_ALLOWLIST"), {"BTCUSDC", "BTCUSDT"}),
             default_notional_usdt=_float(default_notional, 100.0),
             max_notional_usdt=_float(max_notional, 150.0),
             max_leverage=_int(merged.get("MAX_LEVERAGE"), 5),

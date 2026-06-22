@@ -1,6 +1,6 @@
 # Beecthor Perps
 
-Dedicated automation workspace for testing Beecthor-derived BTCUSDC perpetual futures strategies.
+Dedicated automation workspace for testing Beecthor-derived BTCUSDC and BTCUSDT perpetual futures strategies.
 
 The repo is intentionally conservative:
 
@@ -8,7 +8,7 @@ The repo is intentionally conservative:
 - `testnet` must be explicit.
 - `mainnet` is blocked unless a dedicated subaccount and real-money acknowledgement are configured.
 - Strategy output is an order intent, not an order, until it passes deterministic safety checks.
-- BTCUSDC order size starts at the practical minimum that satisfies Binance Demo filters; at recent BTC prices this is usually `0.002 BTC`.
+- BTCUSDC and BTCUSDT order sizes start at the practical minimum that satisfies each Binance Demo symbol's filters; at recent BTC prices this is usually `0.002 BTC`.
 - Multi-position support is explicit: `POSITION_MODE=hedge` requires Binance Hedge Mode to already be enabled and flat before switching.
 
 ## Quick Start
@@ -74,6 +74,8 @@ The bot must refuse to trade when any of these are true:
 `POSITION_MODE=hedge` makes Binance orders include `positionSide=LONG` or `positionSide=SHORT`.
 Protective orders are per-trade quantity orders, not `closePosition=true`, so one TP/SL does not close the whole side.
 Binance will not enable Hedge Mode while positions or open orders exist; use `position-mode set-hedge` only when the Demo account is flat.
+
+BTCUSDC and BTCUSDT are independent symbols, so one One-way position in each symbol can coexist. This is not Hedge Mode: entries within the same symbol still merge into that symbol's single net position. BTCUSDT support here is intended for Demo/testnet; mainnet remains behind the existing subaccount and real-money guards.
 
 ## Playbook
 
